@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LatticeCore</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.166.1/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>LatticeCore</h1>
+          <p>Lokální prototyp pro povrchové a experimentální objemové struktury</p>
+        </div>
+        <div class="local-status">
+          <span></span>
+          Běží lokálně
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="sidebar">
+          <section class="panel">
+            <h2>Model</h2>
+            <label class="file-drop" for="stl-input">
+              <strong>Nahrát STL</strong>
+              <span>Přetáhni soubor nebo klikni</span>
+              <input id="stl-input" type="file" accept=".stl" />
+            </label>
+            <button id="sample-cube" class="secondary-button" type="button">Ukázková kostka</button>
+          </section>
+
+          <section class="panel">
+            <h2>Režim</h2>
+            <div class="segmented" role="group" aria-label="Režim struktury">
+              <button class="active" type="button" data-mode="surface">Plošně</button>
+              <button type="button" data-mode="volume">Objemově</button>
+            </div>
+
+            <label class="field">
+              <span>Typ vzoru</span>
+              <select id="pattern">
+                <option value="voronoi">Voronoi</option>
+                <option value="hex">Hexagon</option>
+                <option value="gyroid">Gyroid</option>
+                <option value="noise">Organický noise</option>
+              </select>
+            </label>
+          </section>
+
+          <section class="panel controls">
+            <h2>Parametry</h2>
+            <label>
+              <span>Velikost buněk <b id="cell-size-value">18</b></span>
+              <input id="cell-size" type="range" min="6" max="42" value="18" />
+            </label>
+            <label>
+              <span>Hloubka <b id="depth-value">1.2 mm</b></span>
+              <input id="depth" type="range" min="0" max="4" value="1.2" step="0.1" />
+            </label>
+            <label>
+              <span>Tloušťka hran <b id="wall-value">0.45</b></span>
+              <input id="wall" type="range" min="0.1" max="1.4" value="0.45" step="0.05" />
+            </label>
+            <label>
+              <span>Hustota <b id="density-value">28</b></span>
+              <input id="density" type="range" min="8" max="80" value="28" />
+            </label>
+            <label>
+              <span>Vyhlazení <b id="smooth-value">0.35</b></span>
+              <input id="smooth" type="range" min="0" max="1" value="0.35" step="0.05" />
+            </label>
+          </section>
+
+          <section class="actions">
+            <button id="preview" class="primary-button" type="button">Přepočítat náhled</button>
+            <button id="reset" class="secondary-button" type="button">Reset</button>
+            <button id="export" class="secondary-button" type="button">Export STL</button>
+          </section>
+        </aside>
+
+        <section class="viewport-wrap">
+          <div id="viewport"></div>
+          <div class="viewport-overlay">
+            <span id="mode-label">Plošný režim</span>
+            <span id="pattern-label">Voronoi</span>
+          </div>
+        </section>
+
+        <aside class="inspector">
+          <section class="panel">
+            <h2>Kontrola</h2>
+            <dl class="stats">
+              <div>
+                <dt>Trojúhelníky</dt>
+                <dd id="triangles">12</dd>
+              </div>
+              <div>
+                <dt>Rozměry</dt>
+                <dd id="dimensions">40 x 40 x 40 mm</dd>
+              </div>
+              <div>
+                <dt>Export</dt>
+                <dd id="export-state">Připraveno</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="panel warning-panel">
+            <h2>Poznámky</h2>
+            <p id="warning-text">
+              Povrchový režim upravuje vrcholy podél normál. Objemový režim je zatím výzkumný náhled vnitřní struktury.
+            </p>
+          </section>
+
+          <section class="panel">
+            <h2>Další krok</h2>
+            <p>
+              Pro bakalářku bude důležité ověřit export ve sliceru a pak přidat robustní generování vnitřního lattice.
+            </p>
+          </section>
+        </aside>
+      </main>
+
+      <footer class="statusbar">
+        <span id="status">Připraveno. Nahraj STL nebo začni s ukázkovou kostkou.</span>
+        <span>Three.js prototyp</span>
+      </footer>
+    </div>
+
+    <script type="module" src="./src/latticecore.js"></script>
+  </body>
+</html>
