@@ -20,6 +20,7 @@ Stav: první verze hotová.
 Stav: první prototyp hotový, potrebuje ladit kvalitu výstupu.
 
 - Voronoi povrchový reliéf.
+- Povrchová Voronoi/lattice síť bez destruktivní deformace původního STL.
 - Hexagonální vzor.
 - Gyroid / organický vzor.
 - Parametry: velikost bunek, hloubka, tloustka hran, hustota, vyhlazení.
@@ -32,6 +33,8 @@ Stav: prototyp trubickové lattice kostry hotový.
 
 - Kostka a kvádr jako hlavní testovací modely.
 - Trubicková prostorová struktura.
+- Rychlý tvarový odhad pro válec a kvádr, aby se lattice nevytvářel jen jako
+  bounding box.
 - Parametry hustoty a prumeru trubek.
 - Export objemové lattice struktury do STL.
 - Otestování exportu ve sliceru.
@@ -42,7 +45,7 @@ Stav: prototyp trubickové lattice kostry hotový.
 Stav: plánovaná výzkumná cást.
 
 - Vytvorení lattice ve bounding boxu modelu.
-- Detekce bodu a hran uvnitr STL.
+- Nahrazení rychlého tvarového odhadu robustní detekcí bodu a hran uvnitr STL.
 - Odstranení cástí mimo model.
 - Napojení lattice na povrch modelu.
 - Vyhodnocení robustnosti na jednoduchých i slozitejsích STL.

@@ -17,6 +17,7 @@ vyexportovat upravený model pro dalsí zpracování ve sliceru.
 - Import a export STL.
 - Povrchové struktury s nastavitelnými parametry.
 - Objemová lattice struktura pro jednoduché tvary.
+- Popsané omezení mezi rychlým prototypem a robustním geometrickým řešením.
 - Testy exportu ve sliceru.
 - Popis algoritmu, omezení a mozností dalsího vývoje.
 
@@ -26,6 +27,7 @@ Nejnárocnejsí cástí je objemová struktura uvnitr obecného STL modelu. Pro
 bakalárskou práci je rozumné ji rozdelit na:
 
 - prototyp na kostce a kvádru,
+- prototyp na válci,
 - detekci hran uvnitr modelu,
 - orez podle povrchu STL,
 - validaci tisknutelnosti.

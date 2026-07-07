@@ -54,9 +54,10 @@ experimentální objemové struktury.
 ## Doporučená architektura
 
 1. `Three.js` pro lokální UI, náhled, import a export STL.
-2. Vlastní procedurální povrchové vzory nad vrcholy meshe.
-3. Experimentální objemový náhled jako trubičková lattice síť uvnitř hranic
-   modelu.
+2. Samostatná povrchová Voronoi/lattice síť nad povrchem modelu, bez
+   destruktivní deformace původního STL.
+3. Experimentální objemový náhled jako kombinace povrchové sítě a vnitřní
+   trubičkové lattice výplně.
 4. Později přidat `manifold` nebo `trimesh` pro skutečný objemový export.
 
 ## Navržené fáze

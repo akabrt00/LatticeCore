@@ -7,6 +7,7 @@ const viewport = document.querySelector("#viewport");
 const fileInput = document.querySelector("#stl-input");
 const fileDrop = document.querySelector(".file-drop");
 const sampleCubeButton = document.querySelector("#sample-cube");
+const sampleCylinderButton = document.querySelector("#sample-cylinder");
 const previewButton = document.querySelector("#preview");
 const resetButton = document.querySelector("#reset");
 const exportButton = document.querySelector("#export");
@@ -76,10 +77,13 @@ const surfaceMaterial = new THREE.MeshStandardMaterial({
   color: 0xd9e3e8,
   metalness: 0.05,
   roughness: 0.54,
+  transparent: true,
+  opacity: 0.16,
+  side: THREE.DoubleSide,
 });
 
 const latticeMaterial = new THREE.MeshStandardMaterial({
-  color: 0x2b2722,
+  color: 0x2f2923,
   metalness: 0.15,
   roughness: 0.46,
 });
@@ -119,6 +123,7 @@ function bindEvents() {
   });
 
   sampleCubeButton.addEventListener("click", loadSampleCube);
+  sampleCylinderButton.addEventListener("click", loadSampleCylinder);
   previewButton.addEventListener("click", applyStructure);
   resetButton.addEventListener("click", resetGeometry);
   exportButton.addEventListener("click", exportStl);
@@ -148,6 +153,11 @@ function bindEvents() {
 function loadSampleCube() {
   const geometry = new THREE.BoxGeometry(40, 40, 40, 72, 72, 72);
   setGeometry(geometry, "Ukázková kostka je připravená.");
+}
+
+function loadSampleCylinder() {
+  const geometry = new THREE.CylinderGeometry(16, 16, 46, 72, 18, false);
+  setGeometry(geometry, "Ukázkový válec je připravený.");
 }
 
 function loadStlFile(file) {
@@ -201,6 +211,11 @@ function applyStructure() {
 
   state.geometry.dispose();
   state.geometry = state.originalGeometry.clone();
+  labels.warning.textContent =
+    state.mode === "surface"
+      ? "Povrchový režim vytváří samostatnou Voronoi/lattice síť nad skutečným povrchem modelu."
+      : "Objemový režim kombinuje povrchovou Voronoi síť a rychlý tvarový odhad vnitřní lattice výplně.";
+
   state.geometry.computeVertexNormals();
   state.geometry.computeBoundingBox();
   state.seedPoints = createSeedPoints(getSurfaceSeedCount(), getSeedSalt());
@@ -208,11 +223,12 @@ function applyStructure() {
   if (state.mode === "surface") {
     state.mesh.visible = true;
     disposeVolumeGroup();
-    deformSurface(state.geometry);
+    state.volumeGroup = createSurfaceLattice(state.originalGeometry);
+    scene.add(state.volumeGroup);
     labels.warning.textContent =
       "Povrchový režim vytváří reliéf na plášti modelu. Hustota a velikost buněk teď mění samotnou síť vzoru.";
   } else {
-    state.mesh.visible = false;
+    state.mesh.visible = true;
     disposeVolumeGroup();
     state.volumeGroup = createVolumeLattice(state.originalGeometry);
     scene.add(state.volumeGroup);
@@ -323,28 +339,126 @@ function organicNoise(point, cellSize, smooth) {
   return THREE.MathUtils.smoothstep(value * 0.5 + 0.5, 0.18 + smooth * 0.2, 0.86) * 1.25 - 0.42;
 }
 
+function createSurfaceLattice(sourceGeometry) {
+  const group = new THREE.Group();
+  group.name = "LatticeCore surface lattice";
+
+  const bbox = sourceGeometry.boundingBox ?? new THREE.Box3().setFromBufferAttribute(sourceGeometry.attributes.position);
+  const radius = getLatticeRadius(bbox);
+  const samples = sampleSurfacePoints(sourceGeometry, getSurfaceLatticeCount(), radius * 0.85);
+  const edges = createSurfaceEdges(samples, bbox);
+
+  for (const [aIndex, bIndex] of edges) {
+    addTube(group, samples[aIndex].position, samples[bIndex].position, radius);
+  }
+
+  const nodeGeometry = new THREE.SphereGeometry(radius * 1.1, 10, 8);
+  for (const sample of samples) {
+    const node = new THREE.Mesh(nodeGeometry, latticeMaterial);
+    node.position.copy(sample.position);
+    group.add(node);
+  }
+
+  return group;
+}
+
+function getLatticeRadius(bbox) {
+  const size = new THREE.Vector3();
+  bbox.getSize(size);
+  const maxAxis = Math.max(size.x, size.y, size.z) || 1;
+  const wall = Number(controlsConfig.wall.value);
+  const depth = Number(controlsConfig.depth.value);
+  return Math.max(maxAxis * 0.006, 0.18 + wall * 0.55 + depth * 0.05);
+}
+
+function getSurfaceLatticeCount() {
+  const density = Number(controlsConfig.density.value);
+  const cellSize = Number(controlsConfig.cellSize.value);
+  const count = Math.round(density * THREE.MathUtils.clamp(20 / cellSize, 0.7, 2.2));
+  return THREE.MathUtils.clamp(count, 18, 80);
+}
+
+function sampleSurfacePoints(geometry, count, offset) {
+  const positions = geometry.attributes.position;
+  const random = mulberry32(5003 + getSeedSalt());
+  const triangles = [];
+  let totalArea = 0;
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  const ab = new THREE.Vector3();
+  const ac = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+
+  for (let index = 0; index < positions.count; index += 3) {
+    a.fromBufferAttribute(positions, index);
+    b.fromBufferAttribute(positions, index + 1);
+    c.fromBufferAttribute(positions, index + 2);
+    ab.subVectors(b, a);
+    ac.subVectors(c, a);
+    const area = ab.cross(ac).length() * 0.5;
+    if (area <= 0) continue;
+    totalArea += area;
+    triangles.push({ index, cumulative: totalArea });
+  }
+
+  const samples = [];
+  for (let sampleIndex = 0; sampleIndex < count && triangles.length > 0; sampleIndex += 1) {
+    const pick = random() * totalArea;
+    const triangle = triangles.find((item) => item.cumulative >= pick) ?? triangles[triangles.length - 1];
+    a.fromBufferAttribute(positions, triangle.index);
+    b.fromBufferAttribute(positions, triangle.index + 1);
+    c.fromBufferAttribute(positions, triangle.index + 2);
+
+    let u = random();
+    let v = random();
+    if (u + v > 1) {
+      u = 1 - u;
+      v = 1 - v;
+    }
+
+    const point = a
+      .clone()
+      .add(new THREE.Vector3().subVectors(b, a).multiplyScalar(u))
+      .add(new THREE.Vector3().subVectors(c, a).multiplyScalar(v));
+    normal.crossVectors(new THREE.Vector3().subVectors(b, a), new THREE.Vector3().subVectors(c, a)).normalize();
+    point.add(normal.clone().multiplyScalar(offset));
+    samples.push({ position: point, normal: normal.clone() });
+  }
+
+  return samples;
+}
+
+function createSurfaceEdges(samples, bbox) {
+  const size = new THREE.Vector3();
+  bbox.getSize(size);
+  const maxAxis = Math.max(size.x, size.y, size.z) || 1;
+  const cellSize = Number(controlsConfig.cellSize.value);
+  const wall = Number(controlsConfig.wall.value);
+  const neighborCount = Math.round(2 + wall * 1.8);
+  const maxDistance = maxAxis * THREE.MathUtils.clamp(cellSize / 46, 0.2, 0.58);
+  return createNearestEdgesFromPositions(
+    samples.map((sample) => sample.position),
+    neighborCount,
+    maxDistance
+  );
+}
+
 function createVolumeLattice(sourceGeometry) {
   const group = new THREE.Group();
   group.name = "LatticeCore volume lattice";
 
   const bbox = sourceGeometry.boundingBox ?? new THREE.Box3().setFromBufferAttribute(sourceGeometry.attributes.position);
   const size = new THREE.Vector3();
-  const center = new THREE.Vector3();
   bbox.getSize(size);
-  bbox.getCenter(center);
-
   const maxAxis = Math.max(size.x, size.y, size.z) || 1;
-  const cellSize = Number(controlsConfig.cellSize.value);
   const wall = Number(controlsConfig.wall.value);
-  const depth = Number(controlsConfig.depth.value);
-  const density = Number(controlsConfig.density.value);
-  const smooth = Number(controlsConfig.smooth.value);
+  const radius = getLatticeRadius(bbox);
+  const surfaceGroup = createSurfaceLattice(sourceGeometry);
+  group.add(surfaceGroup);
 
-  const radius = Math.max(maxAxis * 0.008, 0.22 + wall * 0.68 + depth * 0.08);
-  const points = createVolumePoints(bbox, density, cellSize, smooth);
-  const edges = createNearestEdges(points, maxAxis, cellSize, wall);
-
-  addBoundingFrame(group, bbox, radius * 1.25);
+  const points = createInteriorPoints(sourceGeometry, bbox);
+  const edges = createNearestEdges(points, maxAxis, Number(controlsConfig.cellSize.value), wall, sourceGeometry);
 
   for (const [aIndex, bIndex] of edges) {
     addTube(group, points[aIndex], points[bIndex], radius);
@@ -358,6 +472,100 @@ function createVolumeLattice(sourceGeometry) {
   }
 
   return group;
+}
+
+function createInteriorPoints(sourceGeometry, bbox) {
+  const points = [];
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  bbox.getSize(size);
+  bbox.getCenter(center);
+
+  const density = Number(controlsConfig.density.value);
+  const cellSize = Number(controlsConfig.cellSize.value);
+  const smooth = Number(controlsConfig.smooth.value);
+  const cellFactor = THREE.MathUtils.clamp((42 - cellSize) / 36, 0, 1);
+  const targetCount = THREE.MathUtils.clamp(Math.round(10 + density * 0.28 + cellFactor * 22), 8, 45);
+  const random = mulberry32(8101 + Math.round(density * 17 + cellSize * 31 + smooth * 101));
+  const insideTester = createInsideTester(sourceGeometry);
+
+  let attempts = 0;
+  const maxAttempts = targetCount * 5;
+  while (points.length < targetCount && attempts < maxAttempts) {
+    attempts += 1;
+    const point = new THREE.Vector3(
+      THREE.MathUtils.lerp(bbox.min.x, bbox.max.x, random()),
+      THREE.MathUtils.lerp(bbox.min.y, bbox.max.y, random()),
+      THREE.MathUtils.lerp(bbox.min.z, bbox.max.z, random())
+    );
+    if (insideTester(point)) points.push(point);
+  }
+
+  if (points.length < 6) {
+    points.push(center.clone());
+  }
+
+  return points;
+}
+
+function createInsideTester(sourceGeometry) {
+  const bbox = sourceGeometry.boundingBox ?? new THREE.Box3().setFromBufferAttribute(sourceGeometry.attributes.position);
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  bbox.getSize(size);
+  bbox.getCenter(center);
+
+  const axes = [
+    { name: "x", size: size.x },
+    { name: "y", size: size.y },
+    { name: "z", size: size.z },
+  ].sort((left, right) => right.size - left.size);
+
+  const longest = axes[0];
+  const mid = axes[1];
+  const shortest = axes[2];
+  const looksCylindrical = longest.size > mid.size * 1.22 && mid.size / Math.max(shortest.size, 0.0001) < 1.28;
+
+  if (!looksCylindrical) {
+    return (point) => bbox.containsPoint(point);
+  }
+
+  return (point) => {
+    const local = point.clone().sub(center);
+    const axial = Math.abs(local[longest.name]) / (longest.size * 0.5);
+    const radialA = local[mid.name] / (mid.size * 0.5);
+    const radialB = local[shortest.name] / (shortest.size * 0.5);
+    return axial <= 1 && radialA * radialA + radialB * radialB <= 1;
+  };
+}
+
+function createNearestEdgesFromPositions(points, neighborCount, maxDistance, insideTester = null) {
+  const edges = [];
+  const edgeKeys = new Set();
+  const midpoint = new THREE.Vector3();
+
+  for (let a = 0; a < points.length; a += 1) {
+    const nearest = points
+      .map((point, index) => ({ index, distance: point.distanceTo(points[a]) }))
+      .filter((item) => item.index !== a && item.distance <= maxDistance)
+      .sort((left, right) => left.distance - right.distance)
+      .slice(0, neighborCount);
+
+    for (const item of nearest) {
+      midpoint.addVectors(points[a], points[item.index]).multiplyScalar(0.5);
+      if (insideTester && !insideTester(midpoint)) continue;
+
+      const low = Math.min(a, item.index);
+      const high = Math.max(a, item.index);
+      const key = `${low}:${high}`;
+      if (!edgeKeys.has(key)) {
+        edgeKeys.add(key);
+        edges.push([low, high]);
+      }
+    }
+  }
+
+  return edges;
 }
 
 function createVolumePoints(bbox, density, cellSize, smooth) {
@@ -416,31 +624,11 @@ function randomOffset(random, amount) {
   return new THREE.Vector3(random() - 0.5, random() - 0.5, random() - 0.5).multiplyScalar(amount);
 }
 
-function createNearestEdges(points, maxAxis, cellSize, wall) {
-  const edges = [];
-  const edgeKeys = new Set();
-  const neighborCount = Math.round(3 + wall * 3.2);
+function createNearestEdges(points, maxAxis, cellSize, wall, sourceGeometry = null) {
+  const neighborCount = Math.round(2 + wall * 2.2);
   const maxDistance = maxAxis * THREE.MathUtils.clamp(0.32 + cellSize / 100, 0.36, 0.78);
-
-  for (let a = 0; a < points.length; a += 1) {
-    const nearest = points
-      .map((point, index) => ({ index, distance: point.distanceTo(points[a]) }))
-      .filter((item) => item.index !== a && item.distance <= maxDistance)
-      .sort((left, right) => left.distance - right.distance)
-      .slice(0, neighborCount);
-
-    for (const item of nearest) {
-      const low = Math.min(a, item.index);
-      const high = Math.max(a, item.index);
-      const key = `${low}:${high}`;
-      if (!edgeKeys.has(key)) {
-        edgeKeys.add(key);
-        edges.push([low, high]);
-      }
-    }
-  }
-
-  return edges;
+  const insideTester = sourceGeometry ? createInsideTester(sourceGeometry) : null;
+  return createNearestEdgesFromPositions(points, neighborCount, maxDistance, insideTester);
 }
 
 function addBoundingFrame(group, bbox, radius) {
@@ -544,7 +732,7 @@ function updateLabels() {
 }
 
 function updateStats() {
-  const object = state.mode === "volume" && state.volumeGroup ? state.volumeGroup : state.mesh;
+  const object = state.volumeGroup ?? state.mesh;
   if (!object) return;
 
   const box = new THREE.Box3().setFromObject(object);
@@ -553,7 +741,7 @@ function updateStats() {
 
   labels.triangles.textContent = countTriangles(object).toLocaleString("cs-CZ");
   labels.dimensions.textContent = `${size.x.toFixed(1)} x ${size.y.toFixed(1)} x ${size.z.toFixed(1)} mm`;
-  labels.exportState.textContent = state.mode === "surface" ? "Povrch STL" : "Lattice STL";
+  labels.exportState.textContent = state.mode === "surface" ? "Povrchová síť STL" : "Lattice STL";
 }
 
 function countTriangles(object) {
@@ -585,7 +773,7 @@ function fitCameraToGeometry(geometry) {
 }
 
 function exportStl() {
-  const exportObject = state.mode === "volume" && state.volumeGroup ? state.volumeGroup : state.mesh;
+  const exportObject = state.volumeGroup ?? state.mesh;
   if (!exportObject) return;
 
   const exporter = new STLExporter();

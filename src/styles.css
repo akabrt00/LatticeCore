@@ -180,6 +180,11 @@ h1 {
   margin-top: 10px;
 }
 
+#sample-cylinder {
+  width: 100%;
+  margin-top: 8px;
+}
+
 .primary-button {
   background: linear-gradient(135deg, #2ab0a2, #59d5c7);
   color: #071412;
