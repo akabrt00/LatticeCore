@@ -44,6 +44,7 @@ const state = {
   mesh: null,
   volumeGroup: null,
   seedPoints: [],
+  previewTimer: null,
 };
 
 const scene = new THREE.Scene();
@@ -130,13 +131,13 @@ function bindEvents() {
 
   patternSelect.addEventListener("change", () => {
     updateLabels();
-    applyStructure();
+    scheduleStructurePreview();
   });
 
   Object.values(controlsConfig).forEach((input) => {
     input.addEventListener("input", () => {
       updateLabels();
-      applyStructure();
+      scheduleStructurePreview();
     });
   });
 
@@ -206,8 +207,21 @@ function resetGeometry() {
   labels.status.textContent = "Model vrácen do původního stavu.";
 }
 
+function scheduleStructurePreview() {
+  if (!state.originalGeometry) return;
+  window.clearTimeout(state.previewTimer);
+  labels.status.textContent = "Čekám na dokončení úprav parametrů...";
+  state.previewTimer = window.setTimeout(() => {
+    state.previewTimer = null;
+    applyStructure();
+  }, 180);
+}
+
 function applyStructure() {
   if (!state.originalGeometry || !state.mesh) return;
+  window.clearTimeout(state.previewTimer);
+  state.previewTimer = null;
+  labels.status.textContent = "Přepočítávám náhled...";
 
   state.geometry.dispose();
   state.geometry = state.originalGeometry.clone();

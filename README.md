@@ -22,10 +22,18 @@ jsou zatím vedené jako experimentální část, která se bude rozšiřovat po
 
 ## Stav objemového režimu
 
-Objemový režim teď vytváří trubičkovou prostorovou kostru v hranicích modelu.
-U ukázkové kostky se tím blíží fyzickému Voronoi/lattice vzorku. Pro obecné
-STL modely je to zatím bounding-box prototyp; další krok bude ořezání lattice
-struktury podle skutečného tvaru modelu pomocí robustních boolean operací.
+Objemový režim teď kombinuje povrchovou Voronoi/lattice síť a rychlý tvarový
+odhad vnitřní výplně. U kostky a válce se tím blíží fyzickému lattice vzorku
+bez toho, aby se vše generovalo pouze jako bounding box. Pro obecné STL modely
+je další krok robustní detekce hran uvnitř modelu pomocí přesnějších mesh nebo
+boolean operací.
+
+## Výkon náhledu
+
+Přepočet lattice struktury je výpočetně náročnější než běžné zobrazení STL.
+Slidery proto používají krátkou prodlevu: hodnota se změní okamžitě, ale nový
+náhled se přepočítá až po zastavení tahu. To brání zbytečnému zamrzání UI při
+rychlém nastavování parametrů.
 
 ## Spuštění
 
