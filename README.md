@@ -32,7 +32,8 @@ struktury podle skutečného tvaru modelu pomocí robustních boolean operací.
 V kořenové složce projektu:
 
 ```powershell
-py -m http.server 5173
+npm install
+npm run dev
 ```
 
 Potom otevřít:
@@ -41,6 +42,11 @@ Potom otevřít:
 http://127.0.0.1:5173/
 ```
 
-Poznámka: aktuální prototyp načítá Three.js z CDN, takže pro první spuštění
-je potřeba připojení k internetu. Později lze knihovny přidat přímo do
-projektu a udělat aplikaci plně offline.
+Projekt používá Vite a lokální závislost `three`, takže aplikace už není
+závislá na CDN importech v prohlížeči.
+
+## Build
+
+```powershell
+npm run build
+```

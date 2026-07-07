@@ -147,7 +147,7 @@ function bindEvents() {
 
 function loadSampleCube() {
   const geometry = new THREE.BoxGeometry(40, 40, 40, 72, 72, 72);
-  setGeometry(geometry, "Ukazkova kostka je pripravena.");
+  setGeometry(geometry, "Ukázková kostka je připravená.");
 }
 
 function loadStlFile(file) {
@@ -157,10 +157,10 @@ function loadStlFile(file) {
       const loader = new STLLoader();
       const geometry = loader.parse(reader.result);
       geometry.computeVertexNormals();
-      setGeometry(geometry, `Nacteno: ${file.name}`);
+      setGeometry(geometry, `Načteno: ${file.name}`);
     } catch (error) {
       console.error(error);
-      labels.status.textContent = "STL se nepodarilo nacist. Zkus jiny soubor.";
+      labels.status.textContent = "STL se nepodařilo načíst. Zkus jiný soubor.";
     }
   };
   reader.readAsArrayBuffer(file);
@@ -193,7 +193,7 @@ function resetGeometry() {
   state.mesh.visible = true;
   disposeVolumeGroup();
   updateStats();
-  labels.status.textContent = "Model vracen do puvodniho stavu.";
+  labels.status.textContent = "Model vrácen do původního stavu.";
 }
 
 function applyStructure() {
@@ -210,21 +210,21 @@ function applyStructure() {
     disposeVolumeGroup();
     deformSurface(state.geometry);
     labels.warning.textContent =
-      "Povrchovy rezim vytvari relief na plastich modelu. Hustota a velikost bunek ted meni samotnou sit vzoru.";
+      "Povrchový režim vytváří reliéf na plášti modelu. Hustota a velikost buněk teď mění samotnou síť vzoru.";
   } else {
     state.mesh.visible = false;
     disposeVolumeGroup();
     state.volumeGroup = createVolumeLattice(state.originalGeometry);
     scene.add(state.volumeGroup);
     labels.warning.textContent =
-      "Objemovy rezim generuje trubickovou lattice kostru podle referencni kostky. Pro obecne STL je to zatim bounding-box prototyp.";
+      "Objemový režim generuje trubičkovou lattice kostru podle referenční kostky. Pro obecné STL je to zatím bounding-box prototyp.";
   }
 
   state.geometry.computeVertexNormals();
   state.geometry.computeBoundingBox();
   state.mesh.geometry = state.geometry;
   updateStats();
-  labels.status.textContent = "Nahled prepocitan.";
+  labels.status.textContent = "Náhled přepočítán.";
 }
 
 function deformSurface(geometry) {
@@ -539,7 +539,7 @@ function updateLabels() {
   labels.wall.textContent = Number(controlsConfig.wall.value).toFixed(2);
   labels.density.textContent = controlsConfig.density.value;
   labels.smooth.textContent = Number(controlsConfig.smooth.value).toFixed(2);
-  labels.mode.textContent = state.mode === "surface" ? "Plosny rezim" : "Objemovy lattice";
+  labels.mode.textContent = state.mode === "surface" ? "Plošný režim" : "Objemový lattice";
   labels.pattern.textContent = patternSelect.options[patternSelect.selectedIndex].text;
 }
 
@@ -596,7 +596,7 @@ function exportStl() {
   link.download = `latticecore-${patternSelect.value}-${state.mode}.stl`;
   link.click();
   URL.revokeObjectURL(link.href);
-  labels.status.textContent = "STL export hotovy.";
+  labels.status.textContent = "STL export hotový.";
 }
 
 function resize() {

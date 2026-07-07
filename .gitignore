@@ -1,3 +1,5 @@
 .edge-check*/
 stl-structure-lab-screenshot.png
 latticecore-screenshot.png
+node_modules/
+dist/
