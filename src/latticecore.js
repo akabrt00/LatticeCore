@@ -45,6 +45,7 @@ const state = {
   volumeGroup: null,
   seedPoints: [],
   previewTimer: null,
+  generatorEnabled: false,
 };
 
 const scene = new THREE.Scene();
@@ -125,7 +126,7 @@ function bindEvents() {
 
   sampleCubeButton.addEventListener("click", loadSampleCube);
   sampleCylinderButton.addEventListener("click", loadSampleCylinder);
-  previewButton.addEventListener("click", applyStructure);
+  previewButton.addEventListener("click", applySafeStructure);
   resetButton.addEventListener("click", resetGeometry);
   exportButton.addEventListener("click", exportStl);
 
@@ -146,7 +147,7 @@ function bindEvents() {
       state.mode = button.dataset.mode;
       modeButtons.forEach((item) => item.classList.toggle("active", item === button));
       updateLabels();
-      applyStructure();
+      applySafeStructure();
     });
   });
 }
@@ -192,7 +193,7 @@ function setGeometry(geometry, message) {
   state.mesh = new THREE.Mesh(state.geometry, surfaceMaterial);
   scene.add(state.mesh);
   fitCameraToGeometry(state.geometry);
-  applyStructure();
+  applySafeStructure();
   labels.status.textContent = message;
 }
 
@@ -213,8 +214,29 @@ function scheduleStructurePreview() {
   labels.status.textContent = "Čekám na dokončení úprav parametrů...";
   state.previewTimer = window.setTimeout(() => {
     state.previewTimer = null;
-    applyStructure();
+    applySafeStructure();
   }, 180);
+}
+
+function applySafeStructure() {
+  if (!state.originalGeometry || !state.mesh) return;
+  window.clearTimeout(state.previewTimer);
+  state.previewTimer = null;
+
+  state.geometry.dispose();
+  state.geometry = state.originalGeometry.clone();
+  state.geometry.computeVertexNormals();
+  state.geometry.computeBoundingBox();
+  state.mesh.geometry = state.geometry;
+  state.mesh.visible = true;
+  disposeVolumeGroup();
+
+  labels.warning.textContent =
+    state.mode === "surface"
+      ? "Plošný generátor je pozastavený. Další krok musí být skutečná povrchová Voronoi síť, ne deformace STL vrcholů."
+      : "Objemový generátor je pozastavený. Správný postup je povrchová Voronoi síť a potom vnitřní Voronoi výplň oříznutá tvarem STL.";
+  labels.status.textContent = "Model zobrazen bez nevalidní lattice úpravy.";
+  updateStats();
 }
 
 function applyStructure() {
@@ -755,7 +777,11 @@ function updateStats() {
 
   labels.triangles.textContent = countTriangles(object).toLocaleString("cs-CZ");
   labels.dimensions.textContent = `${size.x.toFixed(1)} x ${size.y.toFixed(1)} x ${size.z.toFixed(1)} mm`;
-  labels.exportState.textContent = state.mode === "surface" ? "Povrchová síť STL" : "Lattice STL";
+  labels.exportState.textContent = state.generatorEnabled
+    ? state.mode === "surface"
+      ? "Povrchová síť STL"
+      : "Lattice STL"
+    : "Pozastaveno";
 }
 
 function countTriangles(object) {
@@ -787,6 +813,11 @@ function fitCameraToGeometry(geometry) {
 }
 
 function exportStl() {
+  if (!state.generatorEnabled) {
+    labels.status.textContent = "Export lattice je pozastavený, aby nevznikaly chybné STL soubory.";
+    return;
+  }
+
   const exportObject = state.volumeGroup ?? state.mesh;
   if (!exportObject) return;
 

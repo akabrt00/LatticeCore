@@ -22,11 +22,15 @@ jsou zatím vedené jako experimentální část, která se bude rozšiřovat po
 
 ## Stav objemového režimu
 
-Objemový režim teď kombinuje povrchovou Voronoi/lattice síť a rychlý tvarový
-odhad vnitřní výplně. U kostky a válce se tím blíží fyzickému lattice vzorku
-bez toho, aby se vše generovalo pouze jako bounding box. Pro obecné STL modely
-je další krok robustní detekce hran uvnitř modelu pomocí přesnějších mesh nebo
-boolean operací.
+Poznámka: generování a export lattice geometrie jsou dočasně pozastavené,
+protože předchozí rychlý prototyp nevytvářel validní Voronoi/lattice síť.
+Aktuální aplikace proto slouží hlavně jako STL viewer, UI pro parametry a
+základ pro další algoritmický experiment. Důvod a další postup jsou popsané v
+[docs/algorithm-reset.md](docs/algorithm-reset.md).
+
+Další krok není ladění současné aproximace, ale nový izolovaný experiment:
+nejdřív korektní povrchová Voronoi síť na kostce, potom až vnitřní výplň a
+export.
 
 ## Výkon náhledu
 
