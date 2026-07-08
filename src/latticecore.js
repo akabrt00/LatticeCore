@@ -45,7 +45,7 @@ const state = {
   volumeGroup: null,
   seedPoints: [],
   previewTimer: null,
-  generatorEnabled: false,
+  generatorEnabled: true,
 };
 
 const scene = new THREE.Scene();
@@ -94,7 +94,15 @@ init();
 
 function init() {
   bindEvents();
-  loadSampleCube();
+  const initialOptions = getInitialOptions();
+  state.mode = initialOptions.mode;
+  syncModeButtons();
+  updateLabels();
+  if (initialOptions.sample === "cylinder") {
+    loadSampleCylinder();
+  } else {
+    loadSampleCube();
+  }
   resize();
   animate();
 }
@@ -126,7 +134,7 @@ function bindEvents() {
 
   sampleCubeButton.addEventListener("click", loadSampleCube);
   sampleCylinderButton.addEventListener("click", loadSampleCylinder);
-  previewButton.addEventListener("click", applySafeStructure);
+  previewButton.addEventListener("click", applyStructure);
   resetButton.addEventListener("click", resetGeometry);
   exportButton.addEventListener("click", exportStl);
 
@@ -145,20 +153,35 @@ function bindEvents() {
   modeButtons.forEach((button) => {
     button.addEventListener("click", () => {
       state.mode = button.dataset.mode;
-      modeButtons.forEach((item) => item.classList.toggle("active", item === button));
+      syncModeButtons();
       updateLabels();
-      applySafeStructure();
+      applyStructure();
     });
+  });
+}
+
+function getInitialOptions() {
+  const params = new URLSearchParams(window.location.search);
+  const mode = params.get("mode") === "volume" ? "volume" : "surface";
+  const sample = params.get("sample") === "cylinder" ? "cylinder" : "cube";
+  return { mode, sample };
+}
+
+function syncModeButtons() {
+  modeButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.mode === state.mode);
   });
 }
 
 function loadSampleCube() {
   const geometry = new THREE.BoxGeometry(40, 40, 40, 72, 72, 72);
+  geometry.userData.latticeShape = "box";
   setGeometry(geometry, "Ukázková kostka je připravená.");
 }
 
 function loadSampleCylinder() {
   const geometry = new THREE.CylinderGeometry(16, 16, 46, 72, 18, false);
+  geometry.userData.latticeShape = "cylinder";
   setGeometry(geometry, "Ukázkový válec je připravený.");
 }
 
@@ -168,6 +191,7 @@ function loadStlFile(file) {
     try {
       const loader = new STLLoader();
       const geometry = loader.parse(reader.result);
+      geometry.userData.latticeShape = "mesh";
       geometry.computeVertexNormals();
       setGeometry(geometry, `Načteno: ${file.name}`);
     } catch (error) {
@@ -193,7 +217,7 @@ function setGeometry(geometry, message) {
   state.mesh = new THREE.Mesh(state.geometry, surfaceMaterial);
   scene.add(state.mesh);
   fitCameraToGeometry(state.geometry);
-  applySafeStructure();
+  applyStructure();
   labels.status.textContent = message;
 }
 
@@ -214,7 +238,7 @@ function scheduleStructurePreview() {
   labels.status.textContent = "Čekám na dokončení úprav parametrů...";
   state.previewTimer = window.setTimeout(() => {
     state.previewTimer = null;
-    applySafeStructure();
+    applyStructure();
   }, 180);
 }
 
@@ -262,14 +286,14 @@ function applyStructure() {
     state.volumeGroup = createSurfaceLattice(state.originalGeometry);
     scene.add(state.volumeGroup);
     labels.warning.textContent =
-      "Povrchový režim vytváří reliéf na plášti modelu. Hustota a velikost buněk teď mění samotnou síť vzoru.";
+      "Plošný režim vytváří samostatnou trubičkovou síť po povrchu modelu. Hustota a velikost buněk mění počet bodů a délku hran.";
   } else {
     state.mesh.visible = true;
     disposeVolumeGroup();
     state.volumeGroup = createVolumeLattice(state.originalGeometry);
     scene.add(state.volumeGroup);
     labels.warning.textContent =
-      "Objemový režim generuje trubičkovou lattice kostru podle referenční kostky. Pro obecné STL je to zatím bounding-box prototyp.";
+      "Objemový režim kombinuje povrchovou síť a vnitřní lattice výplň. U ukázkové kostky a válce se body ořezávají podle tvaru.";
   }
 
   state.geometry.computeVertexNormals();
@@ -410,8 +434,8 @@ function getLatticeRadius(bbox) {
 function getSurfaceLatticeCount() {
   const density = Number(controlsConfig.density.value);
   const cellSize = Number(controlsConfig.cellSize.value);
-  const count = Math.round(density * THREE.MathUtils.clamp(20 / cellSize, 0.7, 2.2));
-  return THREE.MathUtils.clamp(count, 18, 80);
+  const count = Math.round(density * THREE.MathUtils.clamp(50 / cellSize, 1.6, 5.2));
+  return THREE.MathUtils.clamp(count, 45, 220);
 }
 
 function sampleSurfacePoints(geometry, count, offset) {
@@ -471,13 +495,9 @@ function createSurfaceEdges(samples, bbox) {
   const maxAxis = Math.max(size.x, size.y, size.z) || 1;
   const cellSize = Number(controlsConfig.cellSize.value);
   const wall = Number(controlsConfig.wall.value);
-  const neighborCount = Math.round(2 + wall * 1.8);
-  const maxDistance = maxAxis * THREE.MathUtils.clamp(cellSize / 46, 0.2, 0.58);
-  return createNearestEdgesFromPositions(
-    samples.map((sample) => sample.position),
-    neighborCount,
-    maxDistance
-  );
+  const neighborCount = Math.round(3 + wall * 3);
+  const maxDistance = maxAxis * THREE.MathUtils.clamp(cellSize / 34, 0.28, 0.68);
+  return createNearestEdgesFromSamples(samples, neighborCount, maxDistance);
 }
 
 function createVolumeLattice(sourceGeometry) {
@@ -521,12 +541,12 @@ function createInteriorPoints(sourceGeometry, bbox) {
   const cellSize = Number(controlsConfig.cellSize.value);
   const smooth = Number(controlsConfig.smooth.value);
   const cellFactor = THREE.MathUtils.clamp((42 - cellSize) / 36, 0, 1);
-  const targetCount = THREE.MathUtils.clamp(Math.round(10 + density * 0.28 + cellFactor * 22), 8, 45);
+  const targetCount = THREE.MathUtils.clamp(Math.round(12 + density * 0.55 + cellFactor * 34), 10, 80);
   const random = mulberry32(8101 + Math.round(density * 17 + cellSize * 31 + smooth * 101));
   const insideTester = createInsideTester(sourceGeometry);
 
   let attempts = 0;
-  const maxAttempts = targetCount * 5;
+  const maxAttempts = targetCount * 18;
   while (points.length < targetCount && attempts < maxAttempts) {
     attempts += 1;
     const point = new THREE.Vector3(
@@ -560,7 +580,9 @@ function createInsideTester(sourceGeometry) {
   const longest = axes[0];
   const mid = axes[1];
   const shortest = axes[2];
-  const looksCylindrical = longest.size > mid.size * 1.22 && mid.size / Math.max(shortest.size, 0.0001) < 1.28;
+  const shape = sourceGeometry.userData?.latticeShape;
+  const looksCylindrical =
+    shape === "cylinder" || (longest.size > mid.size * 1.22 && mid.size / Math.max(shortest.size, 0.0001) < 1.28);
 
   if (!looksCylindrical) {
     return (point) => bbox.containsPoint(point);
@@ -591,6 +613,35 @@ function createNearestEdgesFromPositions(points, neighborCount, maxDistance, ins
       midpoint.addVectors(points[a], points[item.index]).multiplyScalar(0.5);
       if (insideTester && !insideTester(midpoint)) continue;
 
+      const low = Math.min(a, item.index);
+      const high = Math.max(a, item.index);
+      const key = `${low}:${high}`;
+      if (!edgeKeys.has(key)) {
+        edgeKeys.add(key);
+        edges.push([low, high]);
+      }
+    }
+  }
+
+  return edges;
+}
+
+function createNearestEdgesFromSamples(samples, neighborCount, maxDistance) {
+  const edges = [];
+  const edgeKeys = new Set();
+
+  for (let a = 0; a < samples.length; a += 1) {
+    const nearest = samples
+      .map((sample, index) => ({
+        index,
+        distance: sample.position.distanceTo(samples[a].position),
+        normalDot: sample.normal.dot(samples[a].normal),
+      }))
+      .filter((item) => item.index !== a && item.distance <= maxDistance && item.normalDot > -0.12)
+      .sort((left, right) => left.distance - right.distance)
+      .slice(0, neighborCount);
+
+    for (const item of nearest) {
       const low = Math.min(a, item.index);
       const high = Math.max(a, item.index);
       const key = `${low}:${high}`;
