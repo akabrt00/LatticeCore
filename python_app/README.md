@@ -1,7 +1,7 @@
 # LatticeCore Python MVP
 
 Minimal Python prototype for generating a 3D Voronoi tube lattice inside an
-implicit sphere.
+implicit sphere with a Voronoi-like surface casing.
 
 This is intentionally small: no GUI controls, no STL/OBJ import, no booleans.
 The goal is to verify the core algorithm first.
@@ -32,10 +32,10 @@ exports\voronoi_sphere_with_shell.stl
 python python_app\voronoi_sphere_lines_mvp.py --points 120 --tube-radius 0.02 --random-seed 10
 ```
 
-Shell / casing controls:
+Surface casing controls:
 
 ```powershell
-python python_app\voronoi_sphere_lines_mvp.py --shell-thickness 0.04
+python python_app\voronoi_sphere_lines_mvp.py --surface-points 80 --surface-tube-radius 0.025
 python python_app\voronoi_sphere_lines_mvp.py --no-shell
 ```
 
@@ -47,10 +47,10 @@ python python_app\voronoi_sphere_lines_mvp.py --no-shell
 - skips infinite ridges containing `-1`;
 - keeps only edges whose endpoints are inside the sphere;
 - converts edges to PyVista tube meshes;
-- creates a simple spherical casing/shell around the structure;
-- exports the combined tube + shell mesh to STL;
+- creates a spherical Voronoi-like casing from tubes on the sphere surface;
+- exports the combined inner tubes + surface casing mesh to STL;
 - optionally shows seed points and original line edges with `--debug`.
 
-The shell is currently a simple hollow sphere surface pair merged with the tube
-mesh. It is useful as an MVP casing, but it is not yet a boolean-unioned
-watertight industrial part.
+The surface casing uses `scipy.spatial.SphericalVoronoi`. It is visually close
+to a Voronoi shell, but it is not yet boolean-unioned with the inner struts into
+a perfect industrial manifold.

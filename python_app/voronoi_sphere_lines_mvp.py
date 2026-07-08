@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pyvista as pv
-from scipy.spatial import Voronoi
+from scipy.spatial import SphericalVoronoi, Voronoi
 
 
 def generate_points_in_sphere(n: int, radius: float, random_seed: int = 42) -> np.ndarray:
@@ -79,18 +79,89 @@ def create_tube_mesh(
     return tube_mesh
 
 
-def create_sphere_shell(radius: float, shell_thickness: float) -> pv.PolyData:
-    """Create a simple hollow sphere shell from outer and inner sphere surfaces."""
-    shell_thickness = max(shell_thickness, 0.0)
-    outer = pv.Sphere(radius=radius, theta_resolution=96, phi_resolution=96)
+def generate_points_on_sphere(n: int, radius: float, random_seed: int = 1337) -> np.ndarray:
+    """Generate n repeatable random points on a sphere surface."""
+    rng = np.random.default_rng(random_seed)
+    points = rng.normal(size=(n, 3))
+    lengths = np.linalg.norm(points, axis=1)
+    points = points / lengths[:, None]
+    return points * radius
 
-    if shell_thickness <= 0:
-        return outer.triangulate()
 
-    inner_radius = max(radius - shell_thickness, radius * 0.05)
-    inner = pv.Sphere(radius=inner_radius, theta_resolution=96, phi_resolution=96)
-    inner = inner.flip_faces()
-    return outer.merge(inner).triangulate().clean()
+def spherical_arc_points(start: np.ndarray, end: np.ndarray, radius: float, steps: int = 9) -> np.ndarray:
+    """Interpolate a short great-circle arc between two sphere points."""
+    start_unit = start / np.linalg.norm(start)
+    end_unit = end / np.linalg.norm(end)
+    dot = float(np.clip(np.dot(start_unit, end_unit), -1.0, 1.0))
+    angle = float(np.arccos(dot))
+
+    if angle < 1e-8:
+        return np.asarray([start, end])
+
+    samples = []
+    for value in np.linspace(0.0, 1.0, steps):
+        a = np.sin((1.0 - value) * angle) / np.sin(angle)
+        b = np.sin(value * angle) / np.sin(angle)
+        point = (a * start_unit + b * end_unit) * radius
+        samples.append(point)
+
+    return np.asarray(samples)
+
+
+def create_polyline(points: np.ndarray) -> pv.PolyData:
+    """Create a PyVista polyline from ordered points."""
+    polyline = pv.PolyData()
+    polyline.points = points
+    polyline.lines = np.hstack(([len(points)], np.arange(len(points)))).astype(np.int64)
+    return polyline
+
+
+def compute_surface_voronoi_edges(
+    surface_points: np.ndarray,
+    radius: float,
+) -> list[np.ndarray]:
+    """Compute approximate spherical Voronoi boundary arcs."""
+    spherical_voronoi = SphericalVoronoi(surface_points, radius=radius, center=np.zeros(3))
+    spherical_voronoi.sort_vertices_of_regions()
+    arcs: list[np.ndarray] = []
+    seen_edges: set[tuple[int, int]] = set()
+
+    for region in spherical_voronoi.regions:
+        if len(region) < 2:
+            continue
+
+        for index in range(len(region)):
+            start_index = region[index]
+            end_index = region[(index + 1) % len(region)]
+            edge_key = tuple(sorted((start_index, end_index)))
+            if edge_key in seen_edges:
+                continue
+            seen_edges.add(edge_key)
+            start = spherical_voronoi.vertices[start_index]
+            end = spherical_voronoi.vertices[end_index]
+            arcs.append(spherical_arc_points(start, end, radius))
+
+    return arcs
+
+
+def create_surface_voronoi_shell(
+    radius: float,
+    surface_seed_count: int,
+    tube_radius: float,
+    random_seed: int,
+) -> pv.PolyData:
+    """Create a Voronoi-like open shell made from tubes on the sphere surface."""
+    surface_points = generate_points_on_sphere(surface_seed_count, radius, random_seed)
+    surface_arcs = compute_surface_voronoi_edges(surface_points, radius)
+    shell_mesh = pv.PolyData()
+
+    for arc in surface_arcs:
+        if len(arc) < 2:
+            continue
+        tube = create_polyline(arc).tube(radius=tube_radius, n_sides=16, capping=True)
+        shell_mesh = tube if shell_mesh.n_points == 0 else shell_mesh.merge(tube)
+
+    return shell_mesh.clean()
 
 
 def combine_meshes(meshes: list[pv.PolyData]) -> pv.PolyData:
@@ -127,7 +198,7 @@ def print_mesh_summary(
         "Generated "
         f"inside_edges={len(edges)} "
         f"tube_cells={tube_mesh.n_cells} "
-        f"shell_cells={shell_mesh.n_cells} "
+        f"surface_shell_cells={shell_mesh.n_cells} "
         f"combined_cells={export_mesh.n_cells} "
         f"combined_points={export_mesh.n_points}"
     )
@@ -145,7 +216,7 @@ def show_scene(
     plotter.set_background("#111820")
 
     if shell_mesh.n_points > 0:
-        plotter.add_mesh(shell_mesh, color="#9fb0b8", opacity=0.22, show_edges=True)
+        plotter.add_mesh(shell_mesh, color="#9fb0b8", smooth_shading=True)
 
     if tube_mesh.n_points > 0:
         plotter.add_mesh(tube_mesh, color="#34302a", smooth_shading=True)
@@ -175,10 +246,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--points", type=int, default=80, help="Number of random seed points inside the sphere.")
     parser.add_argument("--radius", type=float, default=1.0, help="Sphere radius.")
     parser.add_argument("--tube-radius", type=float, default=0.025, help="Radius of generated tube struts.")
-    parser.add_argument("--shell-thickness", type=float, default=0.035, help="Thickness of the outer sphere casing.")
+    parser.add_argument("--surface-points", type=int, default=55, help="Number of seed points for surface Voronoi casing.")
+    parser.add_argument("--surface-tube-radius", type=float, default=0.026, help="Radius of surface Voronoi casing struts.")
     parser.add_argument("--random-seed", type=int, default=42, help="Random seed for repeatable results.")
     parser.add_argument("--debug", action="store_true", help="Show original seed points and Voronoi lines.")
-    parser.add_argument("--no-shell", action="store_true", help="Export and show only Voronoi tubes without casing.")
+    parser.add_argument("--no-shell", action="store_true", help="Export and show only inner Voronoi tubes without surface casing.")
     parser.add_argument("--no-show", action="store_true", help="Generate and export without opening a PyVista window.")
     parser.add_argument(
         "--export-stl",
@@ -195,7 +267,16 @@ def main() -> None:
     edges = compute_voronoi_edges(points)
     inside_edges = filter_edges_inside_sphere(edges, args.radius)
     tube_mesh = create_tube_mesh(inside_edges, args.tube_radius)
-    shell_mesh = pv.PolyData() if args.no_shell else create_sphere_shell(args.radius, args.shell_thickness)
+    shell_mesh = (
+        pv.PolyData()
+        if args.no_shell
+        else create_surface_voronoi_shell(
+            args.radius,
+            args.surface_points,
+            args.surface_tube_radius,
+            args.random_seed + 1000,
+        )
+    )
     export_mesh = combine_meshes([shell_mesh, tube_mesh])
     print_mesh_summary(inside_edges, tube_mesh, shell_mesh, export_mesh)
 
