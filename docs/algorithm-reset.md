@@ -74,3 +74,20 @@ Cil experimentu:
 - zadny import obecneho STL,
 - zadny objem,
 - zadny export, dokud nahled nebude geometricky davat smysl.
+
+## Aktualizace podle TUL Voronoi workflow
+
+Po prostudovani prace *Computational design of 3D printed flexible Voronoi
+lattices* je vhodne zmenit prvni experiment: nez povrchovou sit na libovolnem
+STL, je lepsi zacit presne jako v clanku, tedy 3D Voronoi uvnitr jednoducheho
+kvadru. Duvod je, ze clanek jasne definuje validni postup:
+
+- vytvorit zakladni objem,
+- vygenerovat seed body,
+- provest 3D Voronoi tessellation,
+- extrahovat hrany bunek,
+- odstranit kratke struts,
+- vytvorit valce a sfericke uzly,
+- az potom exportovat validni objemovou geometrii.
+
+Podrobnejsi rozpad je v `docs/tul-voronoi-method-notes.md`.

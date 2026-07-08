@@ -76,8 +76,9 @@ Stav: plánováno.
 
 ## Nejblizsí praktické kroky
 
-1. Udelat první commit aktuálního prototypu.
-2. Vyexportovat lattice kostku.
-3. Otevrit export v PrusaSliceru nebo Cura.
-4. Podle výsledku upravit tloustku trubek a hustotu.
-5. Zacít navrhovat orez lattice podle skutecného tvaru STL.
+1. Neobnovovat export soucasneho nevalidniho generatoru.
+2. Vytvorit izolovany experiment 3D Voronoi v kvadru podle TUL workflow.
+3. Zobrazit Voronoi hrany jako cary, bez exportu.
+4. Pridat filtr kratkych struts.
+5. Prevest hrany na valce a uzly na sfery.
+6. Teprve po validnim nahledu zacit resit STL export a slicer test.
