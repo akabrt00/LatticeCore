@@ -79,14 +79,40 @@ def create_tube_mesh(
     return tube_mesh
 
 
-def export_stl(tube_mesh: pv.PolyData, output_path: str | Path) -> None:
-    """Export the tube mesh as STL."""
-    if tube_mesh.n_points == 0:
+def create_sphere_shell(radius: float, shell_thickness: float) -> pv.PolyData:
+    """Create a simple hollow sphere shell from outer and inner sphere surfaces."""
+    shell_thickness = max(shell_thickness, 0.0)
+    outer = pv.Sphere(radius=radius, theta_resolution=96, phi_resolution=96)
+
+    if shell_thickness <= 0:
+        return outer.triangulate()
+
+    inner_radius = max(radius - shell_thickness, radius * 0.05)
+    inner = pv.Sphere(radius=inner_radius, theta_resolution=96, phi_resolution=96)
+    inner = inner.flip_faces()
+    return outer.merge(inner).triangulate().clean()
+
+
+def combine_meshes(meshes: list[pv.PolyData]) -> pv.PolyData:
+    """Merge non-empty meshes into one PolyData object."""
+    combined = pv.PolyData()
+
+    for mesh in meshes:
+        if mesh.n_points == 0:
+            continue
+        combined = mesh if combined.n_points == 0 else combined.merge(mesh)
+
+    return combined.clean()
+
+
+def export_stl(mesh: pv.PolyData, output_path: str | Path) -> None:
+    """Export the generated mesh as STL."""
+    if mesh.n_points == 0:
         raise ValueError("Tube mesh is empty; nothing to export.")
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    tube_mesh.save(output)
+    mesh.save(output)
     print(f"Exported STL: {output.resolve()}")
 
 
@@ -94,14 +120,15 @@ def show_scene(
     points: np.ndarray,
     edges: list[tuple[np.ndarray, np.ndarray]],
     tube_mesh: pv.PolyData,
+    shell_mesh: pv.PolyData,
     debug: bool = False,
 ) -> None:
-    """Show the sphere, tube mesh and optional debug seed points / lines."""
+    """Show the shell, tube mesh and optional debug seed points / lines."""
     plotter = pv.Plotter(window_size=(1100, 850))
     plotter.set_background("#111820")
 
-    sphere = pv.Sphere(radius=1.0, theta_resolution=64, phi_resolution=64)
-    plotter.add_mesh(sphere, color="#9fb0b8", opacity=0.16, style="wireframe")
+    if shell_mesh.n_points > 0:
+        plotter.add_mesh(shell_mesh, color="#9fb0b8", opacity=0.22, show_edges=True)
 
     if tube_mesh.n_points > 0:
         plotter.add_mesh(tube_mesh, color="#34302a", smooth_shading=True)
@@ -131,8 +158,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--points", type=int, default=80, help="Number of random seed points inside the sphere.")
     parser.add_argument("--radius", type=float, default=1.0, help="Sphere radius.")
     parser.add_argument("--tube-radius", type=float, default=0.025, help="Radius of generated tube struts.")
+    parser.add_argument("--shell-thickness", type=float, default=0.035, help="Thickness of the outer sphere casing.")
     parser.add_argument("--random-seed", type=int, default=42, help="Random seed for repeatable results.")
     parser.add_argument("--debug", action="store_true", help="Show original seed points and Voronoi lines.")
+    parser.add_argument("--no-shell", action="store_true", help="Export and show only Voronoi tubes without casing.")
     parser.add_argument("--no-show", action="store_true", help="Generate and export without opening a PyVista window.")
     parser.add_argument(
         "--export-stl",
@@ -149,12 +178,14 @@ def main() -> None:
     edges = compute_voronoi_edges(points)
     inside_edges = filter_edges_inside_sphere(edges, args.radius)
     tube_mesh = create_tube_mesh(inside_edges, args.tube_radius)
+    shell_mesh = pv.PolyData() if args.no_shell else create_sphere_shell(args.radius, args.shell_thickness)
+    export_mesh = combine_meshes([shell_mesh, tube_mesh])
 
     if args.export_stl:
-        export_stl(tube_mesh, args.export_stl)
+        export_stl(export_mesh, args.export_stl)
 
     if not args.no_show:
-        show_scene(points, inside_edges, tube_mesh, debug=args.debug)
+        show_scene(points, inside_edges, tube_mesh, shell_mesh, debug=args.debug)
 
 
 if __name__ == "__main__":
