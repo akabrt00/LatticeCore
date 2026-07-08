@@ -404,8 +404,9 @@ function createSurfaceLattice(sourceGeometry) {
   group.name = "LatticeCore surface lattice";
 
   const bbox = sourceGeometry.boundingBox ?? new THREE.Box3().setFromBufferAttribute(sourceGeometry.attributes.position);
+  const params = getLatticeParams();
   const radius = getLatticeRadius(bbox);
-  const samples = sampleSurfacePoints(sourceGeometry, getSurfaceLatticeCount(), radius * 0.85);
+  const samples = sampleSurfacePoints(sourceGeometry, getSurfaceLatticeCount(), params.surfaceOffset + radius * 0.35);
   const edges = createSurfaceEdges(samples, bbox);
 
   for (const [aIndex, bIndex] of edges) {
@@ -426,16 +427,22 @@ function getLatticeRadius(bbox) {
   const size = new THREE.Vector3();
   bbox.getSize(size);
   const maxAxis = Math.max(size.x, size.y, size.z) || 1;
-  const wall = Number(controlsConfig.wall.value);
-  const depth = Number(controlsConfig.depth.value);
-  return Math.max(maxAxis * 0.006, 0.18 + wall * 0.55 + depth * 0.05);
+  const params = getLatticeParams();
+  return Math.max(maxAxis * 0.0045, params.strutDiameter * 0.5);
+}
+
+function getLatticeParams() {
+  return {
+    cellCount: Number(controlsConfig.cellSize.value),
+    surfaceOffset: Number(controlsConfig.depth.value),
+    strutDiameter: Number(controlsConfig.wall.value),
+    edgeReach: Number(controlsConfig.density.value),
+    randomness: Number(controlsConfig.smooth.value),
+  };
 }
 
 function getSurfaceLatticeCount() {
-  const density = Number(controlsConfig.density.value);
-  const cellSize = Number(controlsConfig.cellSize.value);
-  const count = Math.round(density * THREE.MathUtils.clamp(50 / cellSize, 1.6, 5.2));
-  return THREE.MathUtils.clamp(count, 45, 220);
+  return getLatticeParams().cellCount;
 }
 
 function sampleSurfacePoints(geometry, count, offset) {
@@ -493,10 +500,10 @@ function createSurfaceEdges(samples, bbox) {
   const size = new THREE.Vector3();
   bbox.getSize(size);
   const maxAxis = Math.max(size.x, size.y, size.z) || 1;
-  const cellSize = Number(controlsConfig.cellSize.value);
-  const wall = Number(controlsConfig.wall.value);
-  const neighborCount = Math.round(3 + wall * 3);
-  const maxDistance = maxAxis * THREE.MathUtils.clamp(cellSize / 34, 0.28, 0.68);
+  const params = getLatticeParams();
+  const neighborCount = Math.round(params.edgeReach);
+  const averageSpacing = 1 / Math.sqrt(Math.max(samples.length, 1));
+  const maxDistance = maxAxis * THREE.MathUtils.clamp(averageSpacing * params.edgeReach * 1.55, 0.16, 0.54);
   return createNearestEdgesFromSamples(samples, neighborCount, maxDistance);
 }
 
@@ -508,13 +515,13 @@ function createVolumeLattice(sourceGeometry) {
   const size = new THREE.Vector3();
   bbox.getSize(size);
   const maxAxis = Math.max(size.x, size.y, size.z) || 1;
-  const wall = Number(controlsConfig.wall.value);
+  const params = getLatticeParams();
   const radius = getLatticeRadius(bbox);
   const surfaceGroup = createSurfaceLattice(sourceGeometry);
   group.add(surfaceGroup);
 
   const points = createInteriorPoints(sourceGeometry, bbox);
-  const edges = createNearestEdges(points, maxAxis, Number(controlsConfig.cellSize.value), wall, sourceGeometry);
+  const edges = createNearestEdges(points, maxAxis, params.edgeReach, sourceGeometry);
 
   for (const [aIndex, bIndex] of edges) {
     addTube(group, points[aIndex], points[bIndex], radius);
@@ -537,12 +544,9 @@ function createInteriorPoints(sourceGeometry, bbox) {
   bbox.getSize(size);
   bbox.getCenter(center);
 
-  const density = Number(controlsConfig.density.value);
-  const cellSize = Number(controlsConfig.cellSize.value);
-  const smooth = Number(controlsConfig.smooth.value);
-  const cellFactor = THREE.MathUtils.clamp((42 - cellSize) / 36, 0, 1);
-  const targetCount = THREE.MathUtils.clamp(Math.round(12 + density * 0.55 + cellFactor * 34), 10, 80);
-  const random = mulberry32(8101 + Math.round(density * 17 + cellSize * 31 + smooth * 101));
+  const params = getLatticeParams();
+  const targetCount = THREE.MathUtils.clamp(Math.round(params.cellCount * 0.72), 12, 140);
+  const random = mulberry32(8101 + Math.round(params.cellCount * 13 + params.edgeReach * 97 + params.randomness * 1000));
   const insideTester = createInsideTester(sourceGeometry);
 
   let attempts = 0;
@@ -711,9 +715,10 @@ function randomOffset(random, amount) {
   return new THREE.Vector3(random() - 0.5, random() - 0.5, random() - 0.5).multiplyScalar(amount);
 }
 
-function createNearestEdges(points, maxAxis, cellSize, wall, sourceGeometry = null) {
-  const neighborCount = Math.round(2 + wall * 2.2);
-  const maxDistance = maxAxis * THREE.MathUtils.clamp(0.32 + cellSize / 100, 0.36, 0.78);
+function createNearestEdges(points, maxAxis, edgeReach, sourceGeometry = null) {
+  const neighborCount = Math.round(edgeReach + 1);
+  const averageSpacing = 1 / Math.cbrt(Math.max(points.length, 1));
+  const maxDistance = maxAxis * THREE.MathUtils.clamp(averageSpacing * edgeReach * 1.8, 0.2, 0.72);
   const insideTester = sourceGeometry ? createInsideTester(sourceGeometry) : null;
   return createNearestEdgesFromPositions(points, neighborCount, maxDistance, insideTester);
 }
@@ -785,17 +790,16 @@ function createSeedPoints(count, salt = 0) {
 }
 
 function getSurfaceSeedCount() {
-  const density = Number(controlsConfig.density.value);
-  const cellSize = Number(controlsConfig.cellSize.value);
-  const count = Math.round(density * THREE.MathUtils.clamp(32 / cellSize, 0.8, 4.5));
-  return THREE.MathUtils.clamp(count, 12, 180);
+  return getLatticeParams().cellCount;
 }
 
 function getSeedSalt() {
+  const params = getLatticeParams();
   return Math.round(
-    Number(controlsConfig.cellSize.value) * 19 +
-      Number(controlsConfig.density.value) * 23 +
-      Number(controlsConfig.wall.value) * 100
+    params.cellCount * 19 +
+      params.edgeReach * 230 +
+      params.strutDiameter * 100 +
+      params.randomness * 1000
   );
 }
 
@@ -809,11 +813,12 @@ function mulberry32(seed) {
 }
 
 function updateLabels() {
-  labels.cellSize.textContent = controlsConfig.cellSize.value;
-  labels.depth.textContent = `${Number(controlsConfig.depth.value).toFixed(1)} mm`;
-  labels.wall.textContent = Number(controlsConfig.wall.value).toFixed(2);
-  labels.density.textContent = controlsConfig.density.value;
-  labels.smooth.textContent = Number(controlsConfig.smooth.value).toFixed(2);
+  const params = getLatticeParams();
+  labels.cellSize.textContent = params.cellCount.toFixed(0);
+  labels.depth.textContent = `${params.surfaceOffset.toFixed(1)} mm`;
+  labels.wall.textContent = `${params.strutDiameter.toFixed(2)} mm`;
+  labels.density.textContent = params.edgeReach.toFixed(1);
+  labels.smooth.textContent = params.randomness.toFixed(2);
   labels.mode.textContent = state.mode === "surface" ? "Plošný režim" : "Objemový lattice";
   labels.pattern.textContent = patternSelect.options[patternSelect.selectedIndex].text;
 }

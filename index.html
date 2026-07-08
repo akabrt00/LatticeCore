@@ -42,10 +42,7 @@
             <label class="field">
               <span>Typ vzoru</span>
               <select id="pattern">
-                <option value="voronoi">Voronoi</option>
-                <option value="hex">Hexagon</option>
-                <option value="gyroid">Gyroid</option>
-                <option value="noise">Organický noise</option>
+                <option value="voronoi">Voronoi lattice</option>
               </select>
             </label>
           </section>
@@ -53,23 +50,23 @@
           <section class="panel controls">
             <h2>Parametry</h2>
             <label>
-              <span>Velikost buněk <b id="cell-size-value">18</b></span>
-              <input id="cell-size" type="range" min="6" max="42" value="18" />
+              <span>Počet buněk <b id="cell-size-value">130</b></span>
+              <input id="cell-size" type="range" min="20" max="180" value="130" />
             </label>
             <label>
-              <span>Hloubka <b id="depth-value">1.2 mm</b></span>
-              <input id="depth" type="range" min="0" max="4" value="1.2" step="0.1" />
+              <span>Odsazení povrchu <b id="depth-value">0.8 mm</b></span>
+              <input id="depth" type="range" min="0" max="3" value="0.8" step="0.1" />
             </label>
             <label>
-              <span>Tloušťka hran <b id="wall-value">0.45</b></span>
-              <input id="wall" type="range" min="0.1" max="1.4" value="0.45" step="0.05" />
+              <span>Průměr prutů <b id="wall-value">0.45 mm</b></span>
+              <input id="wall" type="range" min="0.15" max="1.6" value="0.45" step="0.05" />
             </label>
             <label>
-              <span>Hustota <b id="density-value">28</b></span>
-              <input id="density" type="range" min="8" max="80" value="28" />
+              <span>Spojování hran <b id="density-value">4.2</b></span>
+              <input id="density" type="range" min="1.5" max="5.5" value="4.2" step="0.1" />
             </label>
             <label>
-              <span>Vyhlazení <b id="smooth-value">0.35</b></span>
+              <span>Náhodnost buněk <b id="smooth-value">0.35</b></span>
               <input id="smooth" type="range" min="0" max="1" value="0.35" step="0.05" />
             </label>
           </section>
