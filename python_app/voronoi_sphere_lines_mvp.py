@@ -116,6 +116,23 @@ def export_stl(mesh: pv.PolyData, output_path: str | Path) -> None:
     print(f"Exported STL: {output.resolve()}")
 
 
+def print_mesh_summary(
+    edges: list[tuple[np.ndarray, np.ndarray]],
+    tube_mesh: pv.PolyData,
+    shell_mesh: pv.PolyData,
+    export_mesh: pv.PolyData,
+) -> None:
+    """Print a compact generation summary for slicer/debug checks."""
+    print(
+        "Generated "
+        f"inside_edges={len(edges)} "
+        f"tube_cells={tube_mesh.n_cells} "
+        f"shell_cells={shell_mesh.n_cells} "
+        f"combined_cells={export_mesh.n_cells} "
+        f"combined_points={export_mesh.n_points}"
+    )
+
+
 def show_scene(
     points: np.ndarray,
     edges: list[tuple[np.ndarray, np.ndarray]],
@@ -165,7 +182,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-show", action="store_true", help="Generate and export without opening a PyVista window.")
     parser.add_argument(
         "--export-stl",
-        default="exports/voronoi_sphere_tubes.stl",
+        default="exports/voronoi_sphere_with_shell.stl",
         help="Output STL path. Use an empty string to skip export.",
     )
     return parser.parse_args()
@@ -180,6 +197,7 @@ def main() -> None:
     tube_mesh = create_tube_mesh(inside_edges, args.tube_radius)
     shell_mesh = pv.PolyData() if args.no_shell else create_sphere_shell(args.radius, args.shell_thickness)
     export_mesh = combine_meshes([shell_mesh, tube_mesh])
+    print_mesh_summary(inside_edges, tube_mesh, shell_mesh, export_mesh)
 
     if args.export_stl:
         export_stl(export_mesh, args.export_stl)

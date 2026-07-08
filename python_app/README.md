@@ -20,6 +20,12 @@ pip install -r requirements.txt
 python python_app\voronoi_sphere_lines_mvp.py --debug
 ```
 
+Default STL output:
+
+```text
+exports\voronoi_sphere_with_shell.stl
+```
+
 ## Parameters
 
 ```powershell
