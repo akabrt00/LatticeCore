@@ -15,39 +15,38 @@ Stav: první verze hotová.
 - Export STL.
 - Základní README a rešerše.
 
-## Etapa 2: Povrchové struktury
+## Etapa 2: Voronoi povrchová síť
 
 Stav: první prototyp hotový, potrebuje ladit kvalitu výstupu.
 
-- Voronoi povrchový reliéf.
 - Povrchová Voronoi/lattice síť bez destruktivní deformace původního STL.
-- Hexagonální vzor.
-- Gyroid / organický vzor.
-- Parametry: velikost bunek, hloubka, tloustka hran, hustota, vyhlazení.
-- Export upraveného povrchového STL.
+- Parametry: počet buněk, odsazení povrchu, průměr prutů, spojování hran,
+  náhodnost buněk.
+- Export samostatné povrchové lattice geometrie.
 - Otestování výstupu ve sliceru.
+- Dalsí vzory jako hex/gyroid neřešit, dokud nebude Voronoi režim stabilní.
 
-## Etapa 3: Objemový lattice pro jednoduché tvary
+## Etapa 3: Voronoi objemový lattice pro jednoduché tvary
 
 Stav: prototyp trubickové lattice kostry hotový.
 
 - Kostka a kvádr jako hlavní testovací modely.
-- Trubicková prostorová struktura.
+- Voronoi-like prostorová struktura ze seed bodů.
 - Rychlý tvarový odhad pro válec a kvádr, aby se lattice nevytvářel jen jako
   bounding box.
-- Parametry hustoty a prumeru trubek.
+- Parametry počtu buněk, spojování hran a průměru prutů.
 - Export objemové lattice struktury do STL.
 - Otestování exportu ve sliceru.
 - Zhodnocení tisknutelnosti.
 
-## Etapa 4: Orez lattice podle skutecného STL
+## Etapa 4: Skutečná Voronoi tessellace a ořez podle STL
 
 Stav: plánovaná výzkumná cást.
 
-- Vytvorení lattice ve bounding boxu modelu.
-- Nahrazení rychlého tvarového odhadu robustní detekcí bodu a hran uvnitr STL.
-- Odstranení cástí mimo model.
-- Napojení lattice na povrch modelu.
+- Vytvoření Voronoi tessellace v bounding boxu modelu.
+- Detekce bodů, hran a strutů uvnitř STL.
+- Odstranění částí mimo model.
+- Napojení vnitřní lattice na povrchovou Voronoi síť.
 - Vyhodnocení robustnosti na jednoduchých i slozitejsích STL.
 
 ## Etapa 5: Robustnost a vyhodnocení
@@ -76,9 +75,9 @@ Stav: plánováno.
 
 ## Nejblizsí praktické kroky
 
-1. Neobnovovat export soucasneho nevalidniho generatoru.
-2. Vytvorit izolovany experiment 3D Voronoi v kvadru podle TUL workflow.
-3. Zobrazit Voronoi hrany jako cary, bez exportu.
-4. Pridat filtr kratkych struts.
-5. Prevest hrany na valce a uzly na sfery.
-6. Teprve po validnim nahledu zacit resit STL export a slicer test.
+1. Soustredit projekt pouze na Voronoi.
+2. Zlepsit povrchovou Voronoi sit podle principu Voronatoru.
+3. Vytvorit izolovany experiment 3D Voronoi v kvadru podle TUL workflow.
+4. Orezat 3D Voronoi hrany podle jednoducheho tvaru: kostka, valec.
+5. Pridat filtr kratkych struts.
+6. Teprve potom ladit obecne STL a slicer test.

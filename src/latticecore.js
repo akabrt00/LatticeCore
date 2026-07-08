@@ -43,7 +43,6 @@ const state = {
   originalGeometry: null,
   mesh: null,
   volumeGroup: null,
-  seedPoints: [],
   previewTimer: null,
   generatorEnabled: true,
 };
@@ -278,22 +277,20 @@ function applyStructure() {
 
   state.geometry.computeVertexNormals();
   state.geometry.computeBoundingBox();
-  state.seedPoints = createSeedPoints(getSurfaceSeedCount(), getSeedSalt());
-
   if (state.mode === "surface") {
     state.mesh.visible = true;
     disposeVolumeGroup();
     state.volumeGroup = createSurfaceLattice(state.originalGeometry);
     scene.add(state.volumeGroup);
     labels.warning.textContent =
-      "Plošný režim vytváří samostatnou trubičkovou síť po povrchu modelu. Hustota a velikost buněk mění počet bodů a délku hran.";
+      "Plošný režim je teď Voronoi-only: ze seed bodů na povrchu vzniká samostatná síť, původní STL zůstává jen reference.";
   } else {
     state.mesh.visible = true;
     disposeVolumeGroup();
     state.volumeGroup = createVolumeLattice(state.originalGeometry);
     scene.add(state.volumeGroup);
     labels.warning.textContent =
-      "Objemový režim kombinuje povrchovou síť a vnitřní lattice výplň. U ukázkové kostky a válce se body ořezávají podle tvaru.";
+      "Objemový režim kombinuje povrchovou Voronoi síť a vnitřní seed síť ořezanou tvarem modelu.";
   }
 
   state.geometry.computeVertexNormals();
@@ -301,102 +298,6 @@ function applyStructure() {
   state.mesh.geometry = state.geometry;
   updateStats();
   labels.status.textContent = "Náhled přepočítán.";
-}
-
-function deformSurface(geometry) {
-  const positions = geometry.attributes.position;
-  const normals = geometry.attributes.normal;
-  const pattern = patternSelect.value;
-  const bbox = geometry.boundingBox ?? new THREE.Box3().setFromBufferAttribute(positions);
-  const size = new THREE.Vector3();
-  bbox.getSize(size);
-  const maxAxis = Math.max(size.x, size.y, size.z) || 1;
-
-  const depth = Number(controlsConfig.depth.value);
-  const cellSize = Number(controlsConfig.cellSize.value);
-  const wall = Number(controlsConfig.wall.value);
-  const smooth = Number(controlsConfig.smooth.value);
-
-  const point = new THREE.Vector3();
-  const normal = new THREE.Vector3();
-
-  for (let index = 0; index < positions.count; index += 1) {
-    point.fromBufferAttribute(positions, index);
-    normal.fromBufferAttribute(normals, index).normalize();
-
-    const value = patternValue(pattern, point, bbox, maxAxis, cellSize, wall, smooth);
-    const displacement = depth * value;
-
-    positions.setXYZ(
-      index,
-      point.x + normal.x * displacement,
-      point.y + normal.y * displacement,
-      point.z + normal.z * displacement
-    );
-  }
-
-  positions.needsUpdate = true;
-}
-
-function patternValue(pattern, point, bbox, maxAxis, cellSize, wall, smooth) {
-  if (pattern === "voronoi") return voronoiRidge(point, bbox, maxAxis, cellSize, wall, smooth);
-  if (pattern === "hex") return hexPattern(point, cellSize, wall);
-  if (pattern === "gyroid") return gyroidPattern(point, cellSize, wall);
-  return organicNoise(point, cellSize, smooth);
-}
-
-function voronoiRidge(point, bbox, maxAxis, cellSize, wall, smooth) {
-  const normalized = new THREE.Vector3(
-    (point.x - bbox.min.x) / maxAxis,
-    (point.y - bbox.min.y) / maxAxis,
-    (point.z - bbox.min.z) / maxAxis
-  );
-
-  let nearest = Infinity;
-  let second = Infinity;
-
-  for (const seed of state.seedPoints) {
-    const distance = normalized.distanceToSquared(seed);
-    if (distance < nearest) {
-      second = nearest;
-      nearest = distance;
-    } else if (distance < second) {
-      second = distance;
-    }
-  }
-
-  const ridgeWidth = 16 + wall * 15 + (42 - cellSize) * 0.22;
-  const ridge = Math.exp(-Math.abs(Math.sqrt(second) - Math.sqrt(nearest)) * ridgeWidth);
-  const crisp = THREE.MathUtils.smoothstep(ridge, 0.18 + smooth * 0.12, 0.82);
-  return crisp * 1.45 - 0.42;
-}
-
-function hexPattern(point, cellSize, wall) {
-  const scale = 34 / Math.max(cellSize, 1);
-  const q = (Math.sqrt(3) / 3 * point.x - 1 / 3 * point.z) * scale;
-  const r = (2 / 3 * point.z) * scale;
-  const gridX = Math.round(q);
-  const gridY = Math.round(r);
-  const distance = Math.hypot(q - gridX, r - gridY);
-  return Math.exp(-distance * (5.6 + wall * 2.2)) * 1.35 - 0.36;
-}
-
-function gyroidPattern(point, cellSize, wall) {
-  const scale = Math.PI * 2 / Math.max(cellSize, 1);
-  const value =
-    Math.sin(point.x * scale) * Math.cos(point.y * scale) +
-    Math.sin(point.y * scale) * Math.cos(point.z * scale) +
-    Math.sin(point.z * scale) * Math.cos(point.x * scale);
-  return Math.exp(-Math.abs(value) * (2.3 + wall)) * 1.2 - 0.34;
-}
-
-function organicNoise(point, cellSize, smooth) {
-  const scale = 0.12 + 0.62 / Math.max(cellSize, 1);
-  const value =
-    Math.sin(point.x * scale * 2.1 + point.y * scale) *
-      Math.cos(point.z * scale * 1.7 - point.x * scale * 0.8) +
-    Math.sin((point.x + point.y + point.z) * scale * 0.9);
-  return THREE.MathUtils.smoothstep(value * 0.5 + 0.5, 0.18 + smooth * 0.2, 0.86) * 1.25 - 0.42;
 }
 
 function createSurfaceLattice(sourceGeometry) {
@@ -778,19 +679,6 @@ function disposeVolumeGroup() {
     if (object.geometry) object.geometry.dispose();
   });
   state.volumeGroup = null;
-}
-
-function createSeedPoints(count, salt = 0) {
-  const points = [];
-  const random = mulberry32(1337 + count * 17 + salt);
-  for (let index = 0; index < count; index += 1) {
-    points.push(new THREE.Vector3(random(), random(), random()));
-  }
-  return points;
-}
-
-function getSurfaceSeedCount() {
-  return getLatticeParams().cellCount;
 }
 
 function getSeedSalt() {

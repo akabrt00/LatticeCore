@@ -1,36 +1,32 @@
 # LatticeCore
 
-Lokální prototyp aplikace pro bakalářskou práci zaměřený na procedurální
-úpravy STL modelů pro 3D tisk.
+Lokální prototyp aplikace pro bakalářskou práci zaměřený na Voronoi lattice
+struktury pro STL modely a 3D tisk.
 
 ## Cíl
 
 LatticeCore má umožnit nahrát STL model, zobrazit ho v lokálním 3D náhledu,
-aplikovat povrchové struktury a exportovat upravené STL. Objemové struktury
-jsou zatím vedené jako experimentální část, která se bude rozšiřovat postupně.
+vygenerovat Voronoi síť a exportovat vzniklou lattice geometrii. Cílový postup
+je nejdřív vytvořit Voronoi tessellaci a potom ji oříznout tvarem STL modelu.
 
 ## Aktuální funkce
 
 - import STL souboru,
 - ukázková testovací kostka,
 - 3D náhled přes Three.js,
-- povrchové vzory Voronoi, hexagon, gyroid a organický noise,
-- nastavení velikosti buněk, hloubky, tloušťky hran, hustoty a vyhlazení,
+- Voronoi-only povrchový lattice náhled,
+- experimentální Voronoi-like objemový lattice náhled,
+- parametry: počet buněk, odsazení povrchu, průměr prutů, spojování hran a
+  náhodnost buněk,
 - export aktuálně upraveného STL,
-- experimentální objemový lattice náhled z válcových trubek,
 - export povrchového i objemového náhledu do STL.
 
 ## Stav objemového režimu
 
-Poznámka: generování a export lattice geometrie jsou dočasně pozastavené,
-protože předchozí rychlý prototyp nevytvářel validní Voronoi/lattice síť.
-Aktuální aplikace proto slouží hlavně jako STL viewer, UI pro parametry a
-základ pro další algoritmický experiment. Důvod a další postup jsou popsané v
-[docs/algorithm-reset.md](docs/algorithm-reset.md).
-
-Další krok není ladění současné aproximace, ale nový izolovaný experiment:
-nejdřív korektní povrchová Voronoi síť na kostce, potom až vnitřní výplň a
-export.
+Objemový režim je zatím prototyp. U ukázkové kostky a válce se vnitřní body
+ořezávají podle tvaru, ale pro obecné STL je další milník robustní algoritmus:
+Voronoi tessellace v prostoru, kontrola bodů/hran uvnitř STL a ořez mimo model.
+Další poznámky jsou v [docs/voronator-reference-notes.md](docs/voronator-reference-notes.md).
 
 ## Výkon náhledu
 
