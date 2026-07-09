@@ -213,35 +213,159 @@ def point_2d_inside_square(point: np.ndarray, half_size: float) -> bool:
     return bool(np.all(np.abs(point) <= half_size))
 
 
-def compute_square_voronoi_edges(points: np.ndarray, half_size: float) -> list[tuple[np.ndarray, np.ndarray]]:
-    """Compute finite 2D Voronoi line segments inside a square face."""
-    guard = half_size * 2.6
-    guard_points = np.asarray(
-        [
-            [-guard, -guard],
-            [0.0, -guard],
-            [guard, -guard],
-            [guard, 0.0],
-            [guard, guard],
-            [0.0, guard],
-            [-guard, guard],
-            [-guard, 0.0],
-        ]
+def polygon_area_2d(points: np.ndarray) -> float:
+    """Return signed area of a 2D polygon."""
+    if len(points) < 3:
+        return 0.0
+    x = points[:, 0]
+    y = points[:, 1]
+    return float(0.5 * np.sum(x * np.roll(y, -1) - y * np.roll(x, -1)))
+
+
+def clip_polygon_half_plane(
+    polygon: np.ndarray,
+    axis: int,
+    limit: float,
+    keep_less_equal: bool,
+) -> np.ndarray:
+    """Clip a 2D polygon against one axis-aligned half-plane."""
+    if len(polygon) == 0:
+        return polygon
+
+    clipped: list[np.ndarray] = []
+
+    def inside(point: np.ndarray) -> bool:
+        return bool(point[axis] <= limit + 1e-9) if keep_less_equal else bool(point[axis] >= limit - 1e-9)
+
+    def intersection(start: np.ndarray, end: np.ndarray) -> np.ndarray:
+        direction = end - start
+        if abs(direction[axis]) < 1e-12:
+            return end
+        factor = (limit - start[axis]) / direction[axis]
+        return start + factor * direction
+
+    previous = polygon[-1]
+    previous_inside = inside(previous)
+
+    for current in polygon:
+        current_inside = inside(current)
+
+        if current_inside:
+            if not previous_inside:
+                clipped.append(intersection(previous, current))
+            clipped.append(current)
+        elif previous_inside:
+            clipped.append(intersection(previous, current))
+
+        previous = current
+        previous_inside = current_inside
+
+    return np.asarray(clipped)
+
+
+def clip_polygon_to_square(polygon: np.ndarray, half_size: float) -> np.ndarray:
+    """Clip a 2D polygon to the square face boundary."""
+    clipped = polygon
+    clipped = clip_polygon_half_plane(clipped, axis=0, limit=-half_size, keep_less_equal=False)
+    clipped = clip_polygon_half_plane(clipped, axis=0, limit=half_size, keep_less_equal=True)
+    clipped = clip_polygon_half_plane(clipped, axis=1, limit=-half_size, keep_less_equal=False)
+    clipped = clip_polygon_half_plane(clipped, axis=1, limit=half_size, keep_less_equal=True)
+
+    if len(clipped) < 3 or abs(polygon_area_2d(clipped)) < 1e-10:
+        return np.empty((0, 2))
+
+    return clipped
+
+
+def finite_voronoi_regions_2d(points: np.ndarray, extension_radius: float) -> list[np.ndarray]:
+    """Build finite 2D Voronoi regions, extending infinite regions outward."""
+    voronoi = Voronoi(points)
+    center = points.mean(axis=0)
+    all_ridges: dict[int, list[tuple[int, int, int]]] = {}
+
+    for (first_point, second_point), (first_vertex, second_vertex) in zip(
+        voronoi.ridge_points,
+        voronoi.ridge_vertices,
+    ):
+        all_ridges.setdefault(first_point, []).append((second_point, first_vertex, second_vertex))
+        all_ridges.setdefault(second_point, []).append((first_point, first_vertex, second_vertex))
+
+    regions: list[np.ndarray] = []
+
+    for point_index, region_index in enumerate(voronoi.point_region):
+        region = voronoi.regions[region_index]
+
+        if all(vertex_index >= 0 for vertex_index in region):
+            polygon = voronoi.vertices[region]
+            regions.append(order_polygon_vertices(polygon))
+            continue
+
+        new_region = [vertex_index for vertex_index in region if vertex_index >= 0]
+
+        for neighbor_index, first_vertex, second_vertex in all_ridges[point_index]:
+            if first_vertex >= 0 and second_vertex >= 0:
+                continue
+
+            finite_vertex = first_vertex if first_vertex >= 0 else second_vertex
+            tangent = points[neighbor_index] - points[point_index]
+            tangent = tangent / np.linalg.norm(tangent)
+            normal = np.asarray([-tangent[1], tangent[0]])
+            midpoint = points[[point_index, neighbor_index]].mean(axis=0)
+            direction = np.sign(np.dot(midpoint - center, normal)) * normal
+            far_point = voronoi.vertices[finite_vertex] + direction * extension_radius
+            new_region.append(len(voronoi.vertices))
+            voronoi.vertices = np.vstack([voronoi.vertices, far_point])
+
+        regions.append(order_polygon_vertices(voronoi.vertices[new_region]))
+
+    return regions
+
+
+def order_polygon_vertices(points: np.ndarray) -> np.ndarray:
+    """Order 2D polygon vertices around their centroid."""
+    centroid = points.mean(axis=0)
+    angles = np.arctan2(points[:, 1] - centroid[1], points[:, 0] - centroid[0])
+    return points[np.argsort(angles)]
+
+
+def edge_key_2d(start: np.ndarray, end: np.ndarray, decimals: int = 6) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Create a stable undirected key for a 2D segment."""
+    first = tuple(np.round(start, decimals))
+    second = tuple(np.round(end, decimals))
+    return (first, second) if first <= second else (second, first)
+
+
+def edge_is_on_square_boundary(start: np.ndarray, end: np.ndarray, half_size: float) -> bool:
+    """Return True if a segment lies directly on the outer square frame."""
+    tolerance = 1e-6
+    return bool(
+        (abs(start[0] - end[0]) <= tolerance and abs(abs(start[0]) - half_size) <= tolerance)
+        or (abs(start[1] - end[1]) <= tolerance and abs(abs(start[1]) - half_size) <= tolerance)
     )
-    all_points = np.vstack([points, guard_points])
-    real_count = len(points)
-    voronoi = Voronoi(all_points)
+
+
+def compute_square_voronoi_edges(points: np.ndarray, half_size: float) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Compute 2D Voronoi cell edges clipped to a square face."""
     edges: list[tuple[np.ndarray, np.ndarray]] = []
+    seen_edges: set[tuple[tuple[float, float], tuple[float, float]]] = set()
+    regions = finite_voronoi_regions_2d(points, extension_radius=half_size * 8.0)
 
-    for ridge_points, ridge_vertices in zip(voronoi.ridge_points, voronoi.ridge_vertices):
-        if np.any(ridge_points >= real_count):
-            continue
-        if -1 in ridge_vertices or len(ridge_vertices) != 2:
+    for region in regions:
+        clipped_region = clip_polygon_to_square(region, half_size)
+        if len(clipped_region) < 3:
             continue
 
-        start = voronoi.vertices[ridge_vertices[0]]
-        end = voronoi.vertices[ridge_vertices[1]]
-        if point_2d_inside_square(start, half_size) and point_2d_inside_square(end, half_size):
+        for index in range(len(clipped_region)):
+            start = clipped_region[index]
+            end = clipped_region[(index + 1) % len(clipped_region)]
+            if np.linalg.norm(end - start) < half_size * 0.015:
+                continue
+            if edge_is_on_square_boundary(start, end, half_size):
+                continue
+            key = edge_key_2d(start, end)
+            if key in seen_edges:
+                continue
+            seen_edges.add(key)
             edges.append((start, end))
 
     return edges

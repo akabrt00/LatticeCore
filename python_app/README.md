@@ -53,7 +53,8 @@ python python_app\voronoi_sphere_lines_mvp.py --no-shell
 - exports the combined inner tubes + surface casing mesh to STL;
 - optionally shows seed points and original line edges with `--debug`.
 
-The sphere casing uses `scipy.spatial.SphericalVoronoi`. The box casing uses a
-2D Voronoi approximation on each face plus a cube frame. It is visually close to
-the printed Voronoi cube reference, but it is not yet boolean-unioned with the
-inner struts into a perfect industrial manifold.
+The sphere casing uses `scipy.spatial.SphericalVoronoi`. The box casing builds
+2D Voronoi cells on each face, clips those cells to the square face boundary,
+and adds a cube frame as outer struts. This is closer to a printed Voronoi cube:
+each face is a clipped Voronoi network rather than a solid wall. It is not yet
+boolean-unioned with the inner struts into a perfect industrial manifold.
