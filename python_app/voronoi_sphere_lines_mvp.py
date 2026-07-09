@@ -541,6 +541,27 @@ def create_connection_edges(
     return create_box_connection_edges(inside_edges, surface_edges, radius, boundary_band, max_length)
 
 
+def create_node_sphere_mesh(
+    edges: list[tuple[np.ndarray, np.ndarray]],
+    node_radius: float,
+    theta_resolution: int = 8,
+    phi_resolution: int = 8,
+) -> pv.PolyData:
+    """Create small spheres at strut endpoints to close visual/print gaps."""
+    node_mesh = pv.PolyData()
+
+    for point in unique_edge_points(edges):
+        sphere = pv.Sphere(
+            radius=node_radius,
+            center=point,
+            theta_resolution=theta_resolution,
+            phi_resolution=phi_resolution,
+        )
+        node_mesh = sphere if node_mesh.n_points == 0 else node_mesh.merge(sphere)
+
+    return node_mesh.clean()
+
+
 def combine_meshes(meshes: list[pv.PolyData]) -> pv.PolyData:
     """Merge non-empty meshes into one PolyData object."""
     combined = pv.PolyData()
@@ -570,6 +591,7 @@ def print_mesh_summary(
     tube_mesh: pv.PolyData,
     connector_mesh: pv.PolyData,
     shell_mesh: pv.PolyData,
+    node_mesh: pv.PolyData,
     export_mesh: pv.PolyData,
 ) -> None:
     """Print a compact generation summary for slicer/debug checks."""
@@ -580,6 +602,7 @@ def print_mesh_summary(
         f"tube_cells={tube_mesh.n_cells} "
         f"connector_cells={connector_mesh.n_cells} "
         f"surface_shell_cells={shell_mesh.n_cells} "
+        f"node_cells={node_mesh.n_cells} "
         f"combined_cells={export_mesh.n_cells} "
         f"combined_points={export_mesh.n_points}"
     )
@@ -592,6 +615,7 @@ def show_scene(
     tube_mesh: pv.PolyData,
     connector_mesh: pv.PolyData,
     shell_mesh: pv.PolyData,
+    node_mesh: pv.PolyData,
     debug: bool = False,
 ) -> None:
     """Show the shell, tube mesh and optional debug seed points / lines."""
@@ -606,6 +630,9 @@ def show_scene(
 
     if connector_mesh.n_points > 0:
         plotter.add_mesh(connector_mesh, color="#5d5548", smooth_shading=True)
+
+    if node_mesh.n_points > 0:
+        plotter.add_mesh(node_mesh, color="#2f2a24", smooth_shading=True)
 
     if debug:
         plotter.add_points(
@@ -635,6 +662,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tube-radius", type=float, default=0.025, help="Radius of generated tube struts.")
     parser.add_argument("--surface-points", type=int, default=55, help="Number of seed points for surface Voronoi casing.")
     parser.add_argument("--surface-tube-radius", type=float, default=0.026, help="Radius of surface Voronoi casing struts.")
+    parser.add_argument(
+        "--node-radius-scale",
+        type=float,
+        default=1.0,
+        help="Endpoint sphere radius multiplier relative to the connected strut radius.",
+    )
+    parser.add_argument("--no-nodes", action="store_true", help="Skip endpoint spheres at strut joints.")
     parser.add_argument(
         "--connector-band",
         type=float,
@@ -687,14 +721,21 @@ def main() -> None:
         args.connector_max_length * args.radius,
     )
     connector_mesh = create_tube_mesh(connector_edges, args.tube_radius)
-    export_mesh = combine_meshes([shell_mesh, tube_mesh, connector_mesh])
-    print_mesh_summary(inside_edges, connector_edges, tube_mesh, connector_mesh, shell_mesh, export_mesh)
+    if args.no_nodes:
+        node_mesh = pv.PolyData()
+    else:
+        inner_node_mesh = create_node_sphere_mesh(inside_edges + connector_edges, args.tube_radius * args.node_radius_scale)
+        surface_node_mesh = create_node_sphere_mesh(surface_edges, args.surface_tube_radius * args.node_radius_scale)
+        node_mesh = combine_meshes([inner_node_mesh, surface_node_mesh])
+
+    export_mesh = combine_meshes([shell_mesh, tube_mesh, connector_mesh, node_mesh])
+    print_mesh_summary(inside_edges, connector_edges, tube_mesh, connector_mesh, shell_mesh, node_mesh, export_mesh)
 
     if args.export_stl:
         export_stl(export_mesh, args.export_stl)
 
     if not args.no_show:
-        show_scene(args.shape, points, inside_edges, tube_mesh, connector_mesh, shell_mesh, debug=args.debug)
+        show_scene(args.shape, points, inside_edges, tube_mesh, connector_mesh, shell_mesh, node_mesh, debug=args.debug)
 
 
 if __name__ == "__main__":

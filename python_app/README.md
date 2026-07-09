@@ -47,6 +47,13 @@ Inner/surface connection controls:
 python python_app\voronoi_sphere_lines_mvp.py --connector-band 0.35 --connector-max-length 0.55
 ```
 
+Joint/node controls:
+
+```powershell
+python python_app\voronoi_sphere_lines_mvp.py --node-radius-scale 1.0
+python python_app\voronoi_sphere_lines_mvp.py --no-nodes
+```
+
 ## What It Does
 
 - creates an implicit box or sphere centered at `[0, 0, 0]`;
@@ -57,6 +64,7 @@ python python_app\voronoi_sphere_lines_mvp.py --connector-band 0.35 --connector-
 - converts edges to PyVista tube meshes;
 - creates a Voronoi-like casing from tubes on the body surface;
 - connects near-boundary inner lattice endpoints to nearby surface nodes;
+- adds small endpoint spheres at strut joints to reduce gaps in printed/exported geometry;
 - exports the combined inner tubes + surface casing mesh to STL;
 - optionally shows seed points and original line edges with `--debug`.
 
@@ -70,3 +78,7 @@ For box bodies, connector struts are added between inner Voronoi endpoints near
 the boundary and nearby nodes on the same surface face. Increase
 `--connector-band` to catch more inner endpoints, or decrease
 `--connector-max-length` to avoid long diagonal connections.
+
+Endpoint spheres are enabled by default. Their radius is the local strut radius
+multiplied by `--node-radius-scale`, so the default sphere diameter matches the
+strut diameter.
