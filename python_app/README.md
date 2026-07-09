@@ -41,6 +41,12 @@ python python_app\voronoi_sphere_lines_mvp.py --surface-points 80 --surface-tube
 python python_app\voronoi_sphere_lines_mvp.py --no-shell
 ```
 
+Inner/surface connection controls:
+
+```powershell
+python python_app\voronoi_sphere_lines_mvp.py --connector-band 0.35 --connector-max-length 0.55
+```
+
 ## What It Does
 
 - creates an implicit box or sphere centered at `[0, 0, 0]`;
@@ -50,6 +56,7 @@ python python_app\voronoi_sphere_lines_mvp.py --no-shell
 - keeps only edges whose endpoints are inside the selected body;
 - converts edges to PyVista tube meshes;
 - creates a Voronoi-like casing from tubes on the body surface;
+- connects near-boundary inner lattice endpoints to nearby surface nodes;
 - exports the combined inner tubes + surface casing mesh to STL;
 - optionally shows seed points and original line edges with `--debug`.
 
@@ -58,3 +65,8 @@ The sphere casing uses `scipy.spatial.SphericalVoronoi`. The box casing builds
 and adds a cube frame as outer struts. This is closer to a printed Voronoi cube:
 each face is a clipped Voronoi network rather than a solid wall. It is not yet
 boolean-unioned with the inner struts into a perfect industrial manifold.
+
+For box bodies, connector struts are added between inner Voronoi endpoints near
+the boundary and nearby nodes on the same surface face. Increase
+`--connector-band` to catch more inner endpoints, or decrease
+`--connector-max-length` to avoid long diagonal connections.
