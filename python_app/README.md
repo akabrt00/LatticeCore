@@ -51,6 +51,8 @@ Inner/surface connection controls:
 ```powershell
 python python_app\voronoi_sphere_lines_mvp.py --connector-band 0.35 --connector-max-length 0.55
 python python_app\voronoi_sphere_lines_mvp.py --min-strut-length 0.06 --connector-min-length 0.08
+python python_app\voronoi_sphere_lines_mvp.py --support-max-length 0.28
+python python_app\voronoi_sphere_lines_mvp.py --no-supports
 ```
 
 Joint/node controls:
@@ -71,6 +73,7 @@ python python_app\voronoi_sphere_lines_mvp.py --no-nodes
 - converts edges to PyVista tube meshes;
 - creates a Voronoi-like casing from tubes on the body surface;
 - connects near-boundary inner lattice endpoints to nearby surface nodes;
+- adds short support struts for low-degree inner endpoints that would otherwise look detached;
 - adds small endpoint spheres at strut joints to reduce gaps in printed/exported geometry;
 - exports the combined inner tubes + surface casing mesh to STL;
 - optionally shows seed points and original line edges with `--debug`.
@@ -92,3 +95,5 @@ strut diameter.
 
 Use `--min-strut-length` and `--connector-min-length` to remove tiny segments
 that would produce crowded node spheres or small protrusions in the slicer.
+Use `--support-max-length` to control how far the algorithm may search when
+settling a dangling endpoint into the nearby lattice.

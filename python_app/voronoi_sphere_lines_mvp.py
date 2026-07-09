@@ -511,10 +511,15 @@ def same_box_face(point: np.ndarray, surface_point: np.ndarray, half_size: float
     return bool(abs(surface_point[axis] - sign * half_size) <= 1e-6)
 
 
+def point_key_3d(point: np.ndarray, decimals: int = 5) -> tuple[float, float, float]:
+    """Create a stable rounded key for a 3D point."""
+    return tuple(np.round(point, decimals))
+
+
 def edge_key_3d(start: np.ndarray, end: np.ndarray, decimals: int = 5) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
     """Create a stable undirected key for a 3D segment."""
-    first = tuple(np.round(start, decimals))
-    second = tuple(np.round(end, decimals))
+    first = point_key_3d(start, decimals)
+    second = point_key_3d(end, decimals)
     return (first, second) if first <= second else (second, first)
 
 
@@ -570,6 +575,67 @@ def create_connection_edges(
     return create_box_connection_edges(inside_edges, surface_edges, radius, boundary_band, max_length, min_length)
 
 
+def build_node_degree(
+    edges: list[tuple[np.ndarray, np.ndarray]],
+    decimals: int = 5,
+) -> tuple[dict[tuple[float, float, float], int], dict[tuple[float, float, float], np.ndarray]]:
+    """Count how many struts touch each rounded endpoint."""
+    degree: dict[tuple[float, float, float], int] = {}
+    points: dict[tuple[float, float, float], np.ndarray] = {}
+
+    for start, end in edges:
+        for point in (start, end):
+            key = point_key_3d(point, decimals)
+            degree[key] = degree.get(key, 0) + 1
+            points[key] = point
+
+    return degree, points
+
+
+def create_dangling_support_edges(
+    candidate_edges: list[tuple[np.ndarray, np.ndarray]],
+    anchor_edges: list[tuple[np.ndarray, np.ndarray]],
+    half_size: float,
+    min_length: float,
+    max_length: float,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Add short braces from low-degree inner endpoints to nearby lattice nodes."""
+    all_edges = candidate_edges + anchor_edges
+    degree, points_by_key = build_node_degree(all_edges)
+    candidate_degree, candidate_points_by_key = build_node_degree(candidate_edges)
+    existing_edges = {edge_key_3d(start, end) for start, end in all_edges}
+    anchor_points = list(points_by_key.values())
+    support_edges: list[tuple[np.ndarray, np.ndarray]] = []
+    seen_edges: set[tuple[tuple[float, float, float], tuple[float, float, float]]] = set()
+
+    for point_key in candidate_degree:
+        degree_count = degree.get(point_key, 0)
+        if degree_count > 1:
+            continue
+
+        point = candidate_points_by_key[point_key]
+        if box_boundary_distance(point, half_size) <= min_length:
+            continue
+
+        candidates = []
+        for anchor in anchor_points:
+            key = edge_key_3d(point, anchor)
+            if key in existing_edges or key in seen_edges:
+                continue
+            distance = float(np.linalg.norm(anchor - point))
+            if min_length <= distance <= max_length:
+                candidates.append((distance, anchor, key))
+
+        if not candidates:
+            continue
+
+        _, anchor, key = min(candidates, key=lambda item: item[0])
+        seen_edges.add(key)
+        support_edges.append((point, anchor))
+
+    return support_edges
+
+
 def create_node_sphere_mesh(
     edges: list[tuple[np.ndarray, np.ndarray]],
     node_radius: float,
@@ -617,6 +683,7 @@ def export_stl(mesh: pv.PolyData, output_path: str | Path) -> None:
 def print_mesh_summary(
     edges: list[tuple[np.ndarray, np.ndarray]],
     connector_edges: list[tuple[np.ndarray, np.ndarray]],
+    support_edges: list[tuple[np.ndarray, np.ndarray]],
     surface_seed_count: int,
     tube_mesh: pv.PolyData,
     connector_mesh: pv.PolyData,
@@ -629,6 +696,7 @@ def print_mesh_summary(
         "Generated "
         f"inside_edges={len(edges)} "
         f"connector_edges={len(connector_edges)} "
+        f"support_edges={len(support_edges)} "
         f"surface_seeds={surface_seed_count} "
         f"tube_cells={tube_mesh.n_cells} "
         f"connector_cells={connector_mesh.n_cells} "
@@ -711,12 +779,19 @@ def parse_args() -> argparse.Namespace:
         help="Minimum connector strut length, relative to radius.",
     )
     parser.add_argument(
+        "--support-max-length",
+        type=float,
+        default=0.28,
+        help="Maximum support strut length for low-degree inner endpoints, relative to radius.",
+    )
+    parser.add_argument(
         "--node-radius-scale",
         type=float,
         default=1.0,
         help="Endpoint sphere radius multiplier relative to the connected strut radius.",
     )
     parser.add_argument("--no-nodes", action="store_true", help="Skip endpoint spheres at strut joints.")
+    parser.add_argument("--no-supports", action="store_true", help="Skip stabilizing support struts for dangling endpoints.")
     parser.add_argument(
         "--connector-band",
         type=float,
@@ -773,11 +848,25 @@ def main() -> None:
         args.connector_max_length * args.radius,
         connector_min_length,
     )
-    connector_mesh = create_tube_mesh(connector_edges, args.tube_radius)
+    support_edges = (
+        []
+        if args.no_supports or args.shape != "box"
+        else create_dangling_support_edges(
+            inside_edges + connector_edges,
+            surface_edges,
+            args.radius,
+            connector_min_length,
+            args.support_max_length * args.radius,
+        )
+    )
+    connector_mesh = create_tube_mesh(connector_edges + support_edges, args.tube_radius)
     if args.no_nodes:
         node_mesh = pv.PolyData()
     else:
-        inner_node_mesh = create_node_sphere_mesh(inside_edges + connector_edges, args.tube_radius * args.node_radius_scale)
+        inner_node_mesh = create_node_sphere_mesh(
+            inside_edges + connector_edges + support_edges,
+            args.tube_radius * args.node_radius_scale,
+        )
         surface_node_mesh = create_node_sphere_mesh(surface_edges, args.surface_tube_radius * args.node_radius_scale)
         node_mesh = combine_meshes([inner_node_mesh, surface_node_mesh])
 
@@ -785,6 +874,7 @@ def main() -> None:
     print_mesh_summary(
         inside_edges,
         connector_edges,
+        support_edges,
         surface_seed_count,
         tube_mesh,
         connector_mesh,
