@@ -37,14 +37,20 @@ python python_app\voronoi_sphere_lines_mvp.py --shape sphere
 Surface casing controls:
 
 ```powershell
+python python_app\voronoi_sphere_lines_mvp.py --surface-points 0
 python python_app\voronoi_sphere_lines_mvp.py --surface-points 80 --surface-tube-radius 0.025
 python python_app\voronoi_sphere_lines_mvp.py --no-shell
 ```
+
+`--surface-points 0` enables automatic surface density. The surface seed count
+then follows the inner seed count, so a denser inner lattice also gets a denser
+surface network.
 
 Inner/surface connection controls:
 
 ```powershell
 python python_app\voronoi_sphere_lines_mvp.py --connector-band 0.35 --connector-max-length 0.55
+python python_app\voronoi_sphere_lines_mvp.py --min-strut-length 0.06 --connector-min-length 0.08
 ```
 
 Joint/node controls:
@@ -61,6 +67,7 @@ python python_app\voronoi_sphere_lines_mvp.py --no-nodes
 - computes a 3D Voronoi diagram with `scipy.spatial.Voronoi`;
 - skips infinite ridges containing `-1`;
 - keeps only edges whose endpoints are inside the selected body;
+- removes very short struts that would create crowded bumps near joints;
 - converts edges to PyVista tube meshes;
 - creates a Voronoi-like casing from tubes on the body surface;
 - connects near-boundary inner lattice endpoints to nearby surface nodes;
@@ -82,3 +89,6 @@ the boundary and nearby nodes on the same surface face. Increase
 Endpoint spheres are enabled by default. Their radius is the local strut radius
 multiplied by `--node-radius-scale`, so the default sphere diameter matches the
 strut diameter.
+
+Use `--min-strut-length` and `--connector-min-length` to remove tiny segments
+that would produce crowded node spheres or small protrusions in the slicer.
