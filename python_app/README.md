@@ -51,6 +51,7 @@ Inner/surface connection controls:
 ```powershell
 python python_app\voronoi_sphere_lines_mvp.py --connector-band 0.35 --connector-max-length 0.55
 python python_app\voronoi_sphere_lines_mvp.py --min-strut-length 0.06 --connector-min-length 0.08
+python python_app\voronoi_sphere_lines_mvp.py --no-optimize
 python python_app\voronoi_sphere_lines_mvp.py --support-max-length 0.28
 python python_app\voronoi_sphere_lines_mvp.py --no-supports
 ```
@@ -69,7 +70,7 @@ python python_app\voronoi_sphere_lines_mvp.py --no-nodes
 - computes a 3D Voronoi diagram with `scipy.spatial.Voronoi`;
 - skips infinite ridges containing `-1`;
 - keeps only edges whose endpoints are inside the selected body;
-- removes very short struts that would create crowded bumps near joints;
+- runs an automatic cleanup step that removes very short struts/nosníky;
 - converts edges to PyVista tube meshes;
 - creates a Voronoi-like casing from tubes on the body surface;
 - connects near-boundary inner lattice endpoints to nearby surface nodes;
@@ -97,3 +98,5 @@ Use `--min-strut-length` and `--connector-min-length` to remove tiny segments
 that would produce crowded node spheres or small protrusions in the slicer.
 Use `--support-max-length` to control how far the algorithm may search when
 settling a dangling endpoint into the nearby lattice.
+Use `--no-optimize` only for debugging, when you want to compare the raw Voronoi
+network before tiny struts are removed.

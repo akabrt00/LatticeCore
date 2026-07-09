@@ -1,11 +1,21 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pyvista as pv
 from scipy.spatial import SphericalVoronoi, Voronoi
+
+
+@dataclass(frozen=True)
+class OptimizationStats:
+    """Basic counts from the automatic strut cleanup stage."""
+
+    raw_edges: int
+    inside_edges: int
+    removed_short_edges: int
 
 
 def generate_points_in_sphere(n: int, radius: float, random_seed: int = 42) -> np.ndarray:
@@ -108,6 +118,28 @@ def filter_edges_by_length(
         return edges
 
     return [(start, end) for start, end in edges if np.linalg.norm(end - start) >= min_length]
+
+
+def optimize_strut_network(
+    shape: str,
+    edges: list[tuple[np.ndarray, np.ndarray]],
+    radius: float,
+    min_length: float,
+    enabled: bool,
+) -> tuple[list[tuple[np.ndarray, np.ndarray]], OptimizationStats]:
+    """Clip Voronoi edges to the body and remove tiny struts."""
+    inside_edges = filter_edges_inside_body(shape, edges, radius)
+    if enabled:
+        optimized_edges = filter_edges_by_length(inside_edges, min_length)
+    else:
+        optimized_edges = inside_edges
+
+    stats = OptimizationStats(
+        raw_edges=len(edges),
+        inside_edges=len(inside_edges),
+        removed_short_edges=len(inside_edges) - len(optimized_edges),
+    )
+    return optimized_edges, stats
 
 
 def create_tube_mesh(
@@ -684,6 +716,7 @@ def print_mesh_summary(
     edges: list[tuple[np.ndarray, np.ndarray]],
     connector_edges: list[tuple[np.ndarray, np.ndarray]],
     support_edges: list[tuple[np.ndarray, np.ndarray]],
+    optimization_stats: OptimizationStats,
     surface_seed_count: int,
     tube_mesh: pv.PolyData,
     connector_mesh: pv.PolyData,
@@ -694,6 +727,9 @@ def print_mesh_summary(
     """Print a compact generation summary for slicer/debug checks."""
     print(
         "Generated "
+        f"raw_edges={optimization_stats.raw_edges} "
+        f"body_edges={optimization_stats.inside_edges} "
+        f"removed_short_edges={optimization_stats.removed_short_edges} "
         f"inside_edges={len(edges)} "
         f"connector_edges={len(connector_edges)} "
         f"support_edges={len(support_edges)} "
@@ -772,6 +808,7 @@ def parse_args() -> argparse.Namespace:
         default=0.06,
         help="Minimum inner/surface strut length, relative to radius.",
     )
+    parser.add_argument("--no-optimize", action="store_true", help="Keep tiny struts instead of running automatic cleanup.")
     parser.add_argument(
         "--connector-min-length",
         type=float,
@@ -821,10 +858,16 @@ def main() -> None:
 
     points = generate_body_points(args.shape, args.points, args.radius, args.random_seed)
     edges = compute_voronoi_edges(points)
-    min_strut_length = args.min_strut_length * args.radius
-    connector_min_length = args.connector_min_length * args.radius
+    min_strut_length = 0.0 if args.no_optimize else args.min_strut_length * args.radius
+    connector_min_length = 0.0 if args.no_optimize else args.connector_min_length * args.radius
     surface_seed_count = resolve_surface_seed_count(args.shape, args.surface_points, args.points)
-    inside_edges = filter_edges_by_length(filter_edges_inside_body(args.shape, edges, args.radius), min_strut_length)
+    inside_edges, optimization_stats = optimize_strut_network(
+        args.shape,
+        edges,
+        args.radius,
+        min_strut_length,
+        enabled=not args.no_optimize,
+    )
     tube_mesh = create_tube_mesh(inside_edges, args.tube_radius)
     if args.no_shell:
         shell_mesh = pv.PolyData()
@@ -875,6 +918,7 @@ def main() -> None:
         inside_edges,
         connector_edges,
         support_edges,
+        optimization_stats,
         surface_seed_count,
         tube_mesh,
         connector_mesh,
