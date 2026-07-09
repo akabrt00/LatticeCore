@@ -297,7 +297,18 @@ function applyStructure() {
   state.geometry.computeBoundingBox();
   state.mesh.geometry = state.geometry;
   updateStats();
+  labels.warning.textContent = formatOptimizationSummary(state.volumeGroup?.userData.optimization);
   labels.status.textContent = "Náhled přepočítán.";
+}
+
+function formatOptimizationSummary(stats = {}) {
+  const removedNodes = stats.removedNodes ?? 0;
+  const removedEdges = stats.removedEdges ?? 0;
+  const surfaceRemovedNodes = stats.surfaceRemovedNodes ?? 0;
+  const surfaceRemovedEdges = stats.surfaceRemovedEdges ?? 0;
+  const totalRemovedNodes = removedNodes + surfaceRemovedNodes;
+  const totalRemovedEdges = removedEdges + surfaceRemovedEdges;
+  return `Optimalizace: slouceno ${totalRemovedNodes} blizkych uzlu, odstraneno ${totalRemovedEdges} kratkych prutu.`;
 }
 
 function createSurfaceLattice(sourceGeometry) {
@@ -307,8 +318,18 @@ function createSurfaceLattice(sourceGeometry) {
   const bbox = sourceGeometry.boundingBox ?? new THREE.Box3().setFromBufferAttribute(sourceGeometry.attributes.position);
   const params = getLatticeParams();
   const radius = getLatticeRadius(bbox);
-  const samples = sampleSurfacePoints(sourceGeometry, getSurfaceLatticeCount(), params.surfaceOffset + radius * 0.35);
-  const edges = createSurfaceEdges(samples, bbox);
+  const rawSamples = sampleSurfacePoints(sourceGeometry, getSurfaceLatticeCount(), params.surfaceOffset + radius * 0.35);
+  const samples = mergeCloseSamples(rawSamples, getNodeMergeDistance(bbox, radius));
+  const rawEdges = createSurfaceEdges(samples, bbox);
+  const edges = filterIndexedEdgesByLength(rawEdges, samples.map((sample) => sample.position), getMinimumStrutLength(bbox, radius));
+  group.userData.optimization = {
+    rawNodes: rawSamples.length,
+    nodes: samples.length,
+    removedNodes: rawSamples.length - samples.length,
+    rawEdges: rawEdges.length,
+    edges: edges.length,
+    removedEdges: rawEdges.length - edges.length,
+  };
 
   for (const [aIndex, bIndex] of edges) {
     addTube(group, samples[aIndex].position, samples[bIndex].position, radius);
@@ -421,8 +442,21 @@ function createVolumeLattice(sourceGeometry) {
   const surfaceGroup = createSurfaceLattice(sourceGeometry);
   group.add(surfaceGroup);
 
-  const points = createInteriorPoints(sourceGeometry, bbox);
-  const edges = createNearestEdges(points, maxAxis, params.edgeReach, sourceGeometry);
+  const rawPoints = createInteriorPoints(sourceGeometry, bbox);
+  const points = mergeClosePoints(rawPoints, getNodeMergeDistance(bbox, radius));
+  const rawEdges = createNearestEdges(points, maxAxis, params.edgeReach, sourceGeometry);
+  const edges = filterIndexedEdgesByLength(rawEdges, points, getMinimumStrutLength(bbox, radius));
+  const surfaceOptimization = surfaceGroup.userData.optimization ?? {};
+  group.userData.optimization = {
+    rawNodes: rawPoints.length,
+    nodes: points.length,
+    removedNodes: rawPoints.length - points.length,
+    rawEdges: rawEdges.length,
+    edges: edges.length,
+    removedEdges: rawEdges.length - edges.length,
+    surfaceRemovedNodes: surfaceOptimization.removedNodes ?? 0,
+    surfaceRemovedEdges: surfaceOptimization.removedEdges ?? 0,
+  };
 
   for (const [aIndex, bIndex] of edges) {
     addTube(group, points[aIndex], points[bIndex], radius);
@@ -436,6 +470,76 @@ function createVolumeLattice(sourceGeometry) {
   }
 
   return group;
+}
+
+function getNodeMergeDistance(bbox, radius) {
+  const size = new THREE.Vector3();
+  bbox.getSize(size);
+  const maxAxis = Math.max(size.x, size.y, size.z) || 1;
+  return Math.max(radius * 3.15, maxAxis * 0.018);
+}
+
+function getMinimumStrutLength(bbox, radius) {
+  const size = new THREE.Vector3();
+  bbox.getSize(size);
+  const maxAxis = Math.max(size.x, size.y, size.z) || 1;
+  return Math.max(radius * 3.6, maxAxis * 0.024);
+}
+
+function mergeCloseSamples(samples, mergeDistance) {
+  const points = samples.map((sample) => sample.position);
+  const clusters = createPointClusters(points, mergeDistance);
+  return clusters.map((cluster) => {
+    const position = averageVectors(cluster.indices.map((index) => samples[index].position));
+    const normal = averageVectors(cluster.indices.map((index) => samples[index].normal)).normalize();
+    return { position, normal };
+  });
+}
+
+function mergeClosePoints(points, mergeDistance) {
+  return createPointClusters(points, mergeDistance).map((cluster) =>
+    averageVectors(cluster.indices.map((index) => points[index]))
+  );
+}
+
+function createPointClusters(points, mergeDistance) {
+  const clusters = [];
+  const mergeDistanceSq = mergeDistance * mergeDistance;
+
+  for (let pointIndex = 0; pointIndex < points.length; pointIndex += 1) {
+    const point = points[pointIndex];
+    let bestCluster = null;
+    let bestDistanceSq = Infinity;
+
+    for (const cluster of clusters) {
+      const distanceSq = cluster.center.distanceToSquared(point);
+      if (distanceSq < mergeDistanceSq && distanceSq < bestDistanceSq) {
+        bestCluster = cluster;
+        bestDistanceSq = distanceSq;
+      }
+    }
+
+    if (!bestCluster) {
+      clusters.push({ center: point.clone(), indices: [pointIndex] });
+      continue;
+    }
+
+    bestCluster.indices.push(pointIndex);
+    bestCluster.center.copy(averageVectors(bestCluster.indices.map((index) => points[index])));
+  }
+
+  return clusters;
+}
+
+function averageVectors(vectors) {
+  const result = new THREE.Vector3();
+  for (const vector of vectors) result.add(vector);
+  if (vectors.length > 0) result.multiplyScalar(1 / vectors.length);
+  return result;
+}
+
+function filterIndexedEdgesByLength(edges, points, minLength) {
+  return edges.filter(([aIndex, bIndex]) => points[aIndex].distanceTo(points[bIndex]) >= minLength);
 }
 
 function createInteriorPoints(sourceGeometry, bbox) {
