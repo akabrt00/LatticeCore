@@ -1020,11 +1020,10 @@ function disposePrintSupportGroup() {
 function createPrintSupportGroup(sourceGroup) {
   const settings = getPrintSettings();
   const supportGroup = new THREE.Group();
-  supportGroup.name = "LatticeCore print supports";
+  supportGroup.name = "LatticeCore self-support struts";
   const normalWorld = getBuildNormal(settings).normalize();
   const inverseRotation = new THREE.Quaternion().setFromEuler(getPrintEuler(settings)).invert();
   const normalLocal = normalWorld.clone().applyQuaternion(inverseRotation).normalize();
-  const baseProjection = getLocalProjectionMin(sourceGroup, normalLocal);
   const params = getLatticeParams();
   const radius = Math.max(params.strutDiameter * 0.42, 0.08);
   const overhangThreshold = -Math.sin(THREE.MathUtils.degToRad(settings.overhang));
@@ -1032,8 +1031,12 @@ function createPrintSupportGroup(sourceGroup) {
   const size = new THREE.Vector3();
   box.getSize(size);
   const spacing = Math.max(Math.max(size.x, size.y, size.z) * 0.055, radius * 8);
+  const candidates = collectSelfSupportCandidates(sourceGroup, normalLocal, spacing * 0.42);
   const usedCells = new Set();
   const maxSupports = 90;
+  const minDrop = Math.max(radius * 5, spacing * 0.18);
+  const maxLength = Math.max(spacing * 2.25, radius * 18);
+  const minPrintableRise = Math.sin(THREE.MathUtils.degToRad(90 - settings.overhang));
 
   sourceGroup.updateMatrixWorld(true);
   sourceGroup.traverse((object) => {
@@ -1058,37 +1061,76 @@ function createPrintSupportGroup(sourceGroup) {
       if (normal.dot(normalLocal) >= overhangThreshold) continue;
 
       center.copy(a).add(b).add(c).multiplyScalar(1 / 3);
-      const height = center.dot(normalLocal) - baseProjection;
-      if (height < radius * 8) continue;
+      const centerProjection = center.dot(normalLocal);
 
       const key = center.clone().divideScalar(spacing).floor().toArray().join(":");
       if (usedCells.has(key)) continue;
-      usedCells.add(key);
 
-      const foot = center.clone().addScaledVector(normalLocal, -height);
-      addTube(supportGroup, center, foot, radius);
+      const anchor = findSelfSupportAnchor(
+        center,
+        centerProjection,
+        candidates,
+        normalLocal,
+        minDrop,
+        maxLength,
+        minPrintableRise,
+      );
+      if (!anchor) continue;
+
+      usedCells.add(key);
+      addTube(supportGroup, center, anchor, radius);
     }
   });
 
   return supportGroup;
 }
 
-function getLocalProjectionMin(group, normal) {
-  let minProjection = Infinity;
+function collectSelfSupportCandidates(group, normal, mergeDistance) {
+  const candidatesByKey = new Map();
   group.updateMatrixWorld(true);
   group.traverse((object) => {
     if (!object.isMesh || !object.geometry?.attributes?.position) return;
-    if (object.parent?.name === "LatticeCore print supports") return;
+    if (object.parent?.name === "LatticeCore self-support struts") return;
     const position = object.geometry.attributes.position;
     const matrixToGroup = new THREE.Matrix4().copy(group.matrixWorld).invert().multiply(object.matrixWorld);
     const point = new THREE.Vector3();
-    const step = Math.max(1, Math.floor(position.count / 800));
+    const step = Math.max(1, Math.floor(position.count / 2400));
     for (let index = 0; index < position.count; index += step) {
       point.fromBufferAttribute(position, index).applyMatrix4(matrixToGroup);
-      minProjection = Math.min(minProjection, point.dot(normal));
+      const key = point.clone().divideScalar(mergeDistance).floor().toArray().join(":");
+      if (candidatesByKey.has(key)) continue;
+      candidatesByKey.set(key, {
+        point: point.clone(),
+        projection: point.dot(normal),
+      });
     }
   });
-  return Number.isFinite(minProjection) ? minProjection : 0;
+  return [...candidatesByKey.values()];
+}
+
+function findSelfSupportAnchor(center, centerProjection, candidates, normal, minDrop, maxLength, minPrintableRise) {
+  let best = null;
+  let bestScore = Infinity;
+
+  for (const candidate of candidates) {
+    const drop = centerProjection - candidate.projection;
+    if (drop < minDrop) continue;
+
+    const direction = new THREE.Vector3().subVectors(center, candidate.point);
+    const length = direction.length();
+    if (length < minDrop || length > maxLength) continue;
+
+    const riseRatio = Math.abs(direction.dot(normal)) / length;
+    if (riseRatio < minPrintableRise) continue;
+
+    const lateral = Math.sqrt(Math.max(length * length - drop * drop, 0));
+    const score = lateral + length * 0.28;
+    if (score >= bestScore) continue;
+    bestScore = score;
+    best = candidate.point;
+  }
+
+  return best ? best.clone() : null;
 }
 
 function getSeedSalt() {
