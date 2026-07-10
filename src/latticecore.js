@@ -1034,35 +1034,14 @@ function createPrintSupportGroup(sourceGroup) {
   const candidates = collectSelfSupportCandidates(sourceGroup, normalLocal, Math.max(radius * 2.2, spacing * 0.18))
     .sort((a, b) => b.projection - a.projection);
   const usedCells = new Set();
-  const maxSupports = 72;
+  const maxSupports = 96;
+  const maxNodeSupports = 42;
   const minDrop = Math.max(radius * 5, spacing * 0.18);
   const maxLength = Math.max(spacing * 2.25, radius * 18);
-  const minPrintableRise = Math.sin(THREE.MathUtils.degToRad(90 - settings.overhang));
+  const minPrintableRise = Math.sin(THREE.MathUtils.degToRad(38));
   const minProjection = candidates.reduce((lowest, candidate) => Math.min(lowest, candidate.projection), Infinity);
   const nodeCellSize = Math.max(spacing * 0.78, radius * 9);
   const faceCellSize = Math.max(spacing * 0.62, radius * 8);
-
-  for (const candidate of candidates) {
-    if (supportGroup.children.length >= maxSupports) break;
-    if (candidate.projection - minProjection < minDrop * 1.35) continue;
-
-    const key = candidate.point.clone().divideScalar(nodeCellSize).floor().toArray().join(":");
-    if (usedCells.has(key)) continue;
-
-    const anchor = findSelfSupportAnchor(
-      candidate.point,
-      candidate.projection,
-      candidates,
-      normalLocal,
-      minDrop,
-      maxLength,
-      minPrintableRise,
-    );
-    if (!anchor) continue;
-
-    usedCells.add(key);
-    addTube(supportGroup, candidate.point, anchor, radius);
-  }
 
   sourceGroup.updateMatrixWorld(true);
   sourceGroup.traverse((object) => {
@@ -1071,7 +1050,7 @@ function createPrintSupportGroup(sourceGroup) {
     if (object.parent?.name === supportGroup.name) return;
 
     const position = object.geometry.attributes.position;
-    const step = Math.max(1, Math.floor(position.count / 2400));
+    const step = Math.max(1, Math.floor(position.count / 4200));
     const matrixToGroup = new THREE.Matrix4().copy(sourceGroup.matrixWorld).invert().multiply(object.matrixWorld);
     const a = new THREE.Vector3();
     const b = new THREE.Vector3();
@@ -1107,6 +1086,31 @@ function createPrintSupportGroup(sourceGroup) {
       addTube(supportGroup, center, anchor, radius);
     }
   });
+
+  let nodeSupports = 0;
+  for (const candidate of candidates) {
+    if (supportGroup.children.length >= maxSupports) break;
+    if (nodeSupports >= maxNodeSupports) break;
+    if (candidate.projection - minProjection < minDrop * 1.35) continue;
+
+    const key = candidate.point.clone().divideScalar(nodeCellSize).floor().toArray().join(":");
+    if (usedCells.has(key)) continue;
+
+    const anchor = findSelfSupportAnchor(
+      candidate.point,
+      candidate.projection,
+      candidates,
+      normalLocal,
+      minDrop,
+      maxLength,
+      minPrintableRise,
+    );
+    if (!anchor) continue;
+
+    usedCells.add(key);
+    addTube(supportGroup, candidate.point, anchor, radius);
+    nodeSupports += 1;
+  }
 
   return supportGroup;
 }
