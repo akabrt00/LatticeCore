@@ -647,32 +647,59 @@ def create_mesh_surface_lattice_edges(
         cluster_sums: dict[tuple[int, int, int], np.ndarray] = {}
         cluster_counts: dict[tuple[int, int, int], int] = {}
         vertex_keys: list[tuple[int, int, int]] = []
+        edge_keys: set[tuple[tuple[int, int, int], tuple[int, int, int]]] = set()
+
+        def add_cluster_point(point: np.ndarray) -> tuple[int, int, int]:
+            key = tuple(np.floor(point / spacing).astype(int))
+            cluster_sums[key] = cluster_sums.get(key, np.zeros(3)) + point
+            cluster_counts[key] = cluster_counts.get(key, 0) + 1
+            return key
+
+        def add_edge_key(first_key: tuple[int, int, int], second_key: tuple[int, int, int]) -> None:
+            if first_key == second_key:
+                return
+            edge_key = (first_key, second_key) if first_key <= second_key else (second_key, first_key)
+            edge_keys.add(edge_key)
 
         for vertex in vertices:
-            key = tuple(np.floor(vertex / spacing).astype(int))
-            vertex_keys.append(key)
-            cluster_sums[key] = cluster_sums.get(key, np.zeros(3)) + vertex
-            cluster_counts[key] = cluster_counts.get(key, 0) + 1
+            vertex_keys.append(add_cluster_point(vertex))
+
+        for face in faces:
+            face_indices = [int(face[0]), int(face[1]), int(face[2])]
+            face_points = vertices[face_indices]
+            face_keys = [vertex_keys[index] for index in face_indices]
+            for first_index, second_index in (
+                (0, 1),
+                (1, 2),
+                (2, 0),
+            ):
+                add_edge_key(face_keys[first_index], face_keys[second_index])
+
+            edge_lengths = [
+                float(np.linalg.norm(face_points[1] - face_points[0])),
+                float(np.linalg.norm(face_points[2] - face_points[1])),
+                float(np.linalg.norm(face_points[0] - face_points[2])),
+            ]
+            face_area = float(np.linalg.norm(np.cross(face_points[1] - face_points[0], face_points[2] - face_points[0])) * 0.5)
+            needs_inner_node = max(edge_lengths) > spacing * 1.45 or face_area > spacing * spacing * 0.55
+            if needs_inner_node:
+                centroid_key = add_cluster_point(np.mean(face_points, axis=0))
+                for corner_key in face_keys:
+                    add_edge_key(centroid_key, corner_key)
+
+                for edge_index, length in enumerate(edge_lengths):
+                    if length <= spacing * 1.75:
+                        continue
+                    start_index, end_index = ((0, 1), (1, 2), (2, 0))[edge_index]
+                    midpoint_key = add_cluster_point((face_points[start_index] + face_points[end_index]) * 0.5)
+                    add_edge_key(midpoint_key, face_keys[start_index])
+                    add_edge_key(midpoint_key, face_keys[end_index])
+                    add_edge_key(midpoint_key, centroid_key)
 
         cluster_points = {
             key: cluster_sums[key] / cluster_counts[key]
             for key in cluster_sums
         }
-        edge_keys: set[tuple[tuple[int, int, int], tuple[int, int, int]]] = set()
-
-        for face in faces:
-            for first_index, second_index in (
-                (int(face[0]), int(face[1])),
-                (int(face[1]), int(face[2])),
-                (int(face[2]), int(face[0])),
-            ):
-                first_key = vertex_keys[first_index]
-                second_key = vertex_keys[second_index]
-                if first_key == second_key:
-                    continue
-
-                edge_key = (first_key, second_key) if first_key <= second_key else (second_key, first_key)
-                edge_keys.add(edge_key)
 
         max_edge_length = spacing * 2.6
         surface_edges: list[tuple[np.ndarray, np.ndarray]] = []
@@ -840,6 +867,50 @@ def create_connection_edges(
     if shape != "box" or not surface_edges:
         return []
     return create_box_connection_edges(inside_edges, surface_edges, radius, boundary_band, max_length, min_length)
+
+
+def keep_edges_connected_to_surface(
+    inside_edges: list[tuple[np.ndarray, np.ndarray]],
+    connector_edges: list[tuple[np.ndarray, np.ndarray]],
+    surface_edges: list[tuple[np.ndarray, np.ndarray]],
+) -> tuple[list[tuple[np.ndarray, np.ndarray]], list[tuple[np.ndarray, np.ndarray]], int]:
+    """Remove imported-mesh inner islands that are not connected to the surface shell."""
+    if not inside_edges or not surface_edges:
+        return inside_edges, connector_edges, 0
+
+    graph: dict[tuple[float, float, float], set[tuple[float, float, float]]] = {}
+    surface_keys = {point_key_3d(point) for point in unique_edge_points(surface_edges)}
+
+    def add_graph_edge(start: np.ndarray, end: np.ndarray) -> None:
+        start_key = point_key_3d(start)
+        end_key = point_key_3d(end)
+        graph.setdefault(start_key, set()).add(end_key)
+        graph.setdefault(end_key, set()).add(start_key)
+
+    for start, end in inside_edges + connector_edges:
+        add_graph_edge(start, end)
+
+    visited: set[tuple[float, float, float]] = set()
+    stack = [key for key in surface_keys if key in graph]
+    while stack:
+        key = stack.pop()
+        if key in visited:
+            continue
+        visited.add(key)
+        stack.extend(graph.get(key, set()) - visited)
+
+    filtered_inside = [
+        (start, end)
+        for start, end in inside_edges
+        if point_key_3d(start) in visited and point_key_3d(end) in visited
+    ]
+    filtered_connectors = [
+        (start, end)
+        for start, end in connector_edges
+        if point_key_3d(start) in visited and point_key_3d(end) in visited
+    ]
+    removed_count = (len(inside_edges) - len(filtered_inside)) + (len(connector_edges) - len(filtered_connectors))
+    return filtered_inside, filtered_connectors, removed_count
 
 
 def build_node_degree(
@@ -1170,6 +1241,16 @@ def main() -> None:
             connector_min_length,
         )
     )
+    if body_mesh is not None and not args.surface_only:
+        inside_edges, connector_edges, disconnected_removed = keep_edges_connected_to_surface(
+            inside_edges,
+            connector_edges,
+            surface_edges,
+        )
+        if disconnected_removed:
+            print(f"Removed disconnected imported-mesh struts: {disconnected_removed}")
+        tube_mesh = create_tube_mesh(inside_edges, args.tube_radius)
+
     support_edges = (
         []
         if args.no_supports or shape != "box"
