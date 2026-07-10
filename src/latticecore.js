@@ -38,7 +38,7 @@ const labels = {
 };
 
 const state = {
-  mode: "surface",
+  mode: "volume",
   geometry: null,
   originalGeometry: null,
   mesh: null,
@@ -161,7 +161,7 @@ function bindEvents() {
 
 function getInitialOptions() {
   const params = new URLSearchParams(window.location.search);
-  const mode = params.get("mode") === "volume" ? "volume" : "surface";
+  const mode = params.get("mode") === "surface" ? "surface" : "volume";
   const sample = params.get("sample") === "cylinder" ? "cylinder" : "cube";
   return { mode, sample };
 }
@@ -262,7 +262,7 @@ function applySafeStructure() {
   updateStats();
 }
 
-function applyStructure() {
+async function applyStructure() {
   if (!state.originalGeometry || !state.mesh) return;
   window.clearTimeout(state.previewTimer);
   state.previewTimer = null;
@@ -287,7 +287,7 @@ function applyStructure() {
   } else {
     state.mesh.visible = true;
     disposeVolumeGroup();
-    state.volumeGroup = createVolumeLattice(state.originalGeometry);
+    state.volumeGroup = await createVolumeLattice(state.originalGeometry);
     scene.add(state.volumeGroup);
     labels.warning.textContent =
       "Objemový režim kombinuje povrchovou Voronoi síť a vnitřní seed síť ořezanou tvarem modelu.";
@@ -302,6 +302,10 @@ function applyStructure() {
 }
 
 function formatOptimizationSummary(stats = {}) {
+  if (stats.pythonGenerator) {
+    return "Pouzit Python STL generator: stejny pipeline jako testovany export.";
+  }
+
   const removedNodes = stats.removedNodes ?? 0;
   const removedEdges = stats.removedEdges ?? 0;
   const surfaceRemovedNodes = stats.surfaceRemovedNodes ?? 0;
@@ -429,7 +433,16 @@ function createSurfaceEdges(samples, bbox) {
   return createNearestEdgesFromSamples(samples, neighborCount, maxDistance);
 }
 
-function createVolumeLattice(sourceGeometry) {
+async function createVolumeLattice(sourceGeometry) {
+  if (sourceGeometry.userData?.latticeShape === "box") {
+    try {
+      return await createPythonVolumeLattice(sourceGeometry);
+    } catch (error) {
+      console.error(error);
+      labels.warning.textContent = "Python generator selhal, zobrazuji starsi JS nahled.";
+    }
+  }
+
   const group = new THREE.Group();
   group.name = "LatticeCore volume lattice";
 
@@ -469,6 +482,44 @@ function createVolumeLattice(sourceGeometry) {
     group.add(node);
   }
 
+  return group;
+}
+
+async function createPythonVolumeLattice(sourceGeometry) {
+  const bbox = sourceGeometry.boundingBox ?? new THREE.Box3().setFromBufferAttribute(sourceGeometry.attributes.position);
+  const size = new THREE.Vector3();
+  bbox.getSize(size);
+  const maxAxis = Math.max(size.x, size.y, size.z) || 1;
+  const params = getLatticeParams();
+  const radius = maxAxis * 0.5;
+  const query = new URLSearchParams({
+    points: String(Math.round(params.cellCount)),
+    radius: String(radius),
+    tubeRadius: String(Math.max(params.strutDiameter * 0.5, maxAxis * 0.0045)),
+    seed: String(Math.round(42 + params.randomness * 1000 + params.edgeReach * 31)),
+  });
+
+  labels.status.textContent = "Python generuje Voronoi STL...";
+  const response = await fetch(`/api/python-lattice?${query.toString()}`, { cache: "no-store" });
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message);
+  }
+
+  const buffer = await response.arrayBuffer();
+  const geometry = new STLLoader().parse(buffer);
+  geometry.center();
+  geometry.computeVertexNormals();
+
+  const mesh = new THREE.Mesh(geometry, latticeMaterial);
+  const group = new THREE.Group();
+  group.name = "LatticeCore Python volume lattice";
+  group.add(mesh);
+  group.userData.optimization = {
+    pythonGenerator: true,
+    removedNodes: 0,
+    removedEdges: 0,
+  };
   return group;
 }
 
