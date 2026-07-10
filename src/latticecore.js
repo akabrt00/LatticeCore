@@ -202,7 +202,9 @@ function loadStlFile(file) {
 }
 
 function setGeometry(geometry, message) {
+  const userData = { ...geometry.userData };
   geometry = geometry.toNonIndexed();
+  geometry.userData = { ...geometry.userData, ...userData };
   geometry.center();
   geometry.computeVertexNormals();
   geometry.computeBoundingBox();
