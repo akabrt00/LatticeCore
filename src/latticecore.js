@@ -1031,12 +1031,38 @@ function createPrintSupportGroup(sourceGroup) {
   const size = new THREE.Vector3();
   box.getSize(size);
   const spacing = Math.max(Math.max(size.x, size.y, size.z) * 0.055, radius * 8);
-  const candidates = collectSelfSupportCandidates(sourceGroup, normalLocal, spacing * 0.42);
+  const candidates = collectSelfSupportCandidates(sourceGroup, normalLocal, Math.max(radius * 2.2, spacing * 0.18))
+    .sort((a, b) => b.projection - a.projection);
   const usedCells = new Set();
-  const maxSupports = 90;
+  const maxSupports = 72;
   const minDrop = Math.max(radius * 5, spacing * 0.18);
   const maxLength = Math.max(spacing * 2.25, radius * 18);
   const minPrintableRise = Math.sin(THREE.MathUtils.degToRad(90 - settings.overhang));
+  const minProjection = candidates.reduce((lowest, candidate) => Math.min(lowest, candidate.projection), Infinity);
+  const nodeCellSize = Math.max(spacing * 0.78, radius * 9);
+  const faceCellSize = Math.max(spacing * 0.62, radius * 8);
+
+  for (const candidate of candidates) {
+    if (supportGroup.children.length >= maxSupports) break;
+    if (candidate.projection - minProjection < minDrop * 1.35) continue;
+
+    const key = candidate.point.clone().divideScalar(nodeCellSize).floor().toArray().join(":");
+    if (usedCells.has(key)) continue;
+
+    const anchor = findSelfSupportAnchor(
+      candidate.point,
+      candidate.projection,
+      candidates,
+      normalLocal,
+      minDrop,
+      maxLength,
+      minPrintableRise,
+    );
+    if (!anchor) continue;
+
+    usedCells.add(key);
+    addTube(supportGroup, candidate.point, anchor, radius);
+  }
 
   sourceGroup.updateMatrixWorld(true);
   sourceGroup.traverse((object) => {
@@ -1063,7 +1089,7 @@ function createPrintSupportGroup(sourceGroup) {
       center.copy(a).add(b).add(c).multiplyScalar(1 / 3);
       const centerProjection = center.dot(normalLocal);
 
-      const key = center.clone().divideScalar(spacing).floor().toArray().join(":");
+      const key = center.clone().divideScalar(faceCellSize).floor().toArray().join(":");
       if (usedCells.has(key)) continue;
 
       const anchor = findSelfSupportAnchor(
