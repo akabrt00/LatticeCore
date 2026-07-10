@@ -71,6 +71,39 @@
             </label>
           </section>
 
+          <section class="panel controls">
+            <h2>Tisk</h2>
+            <label class="toggle-row">
+              <span>Automatické podpěrné pruty <b id="print-support-value">zap</b></span>
+              <input id="print-support" type="checkbox" checked />
+            </label>
+            <label class="field">
+              <span>Tisková rovina</span>
+              <select id="print-plane">
+                <option value="xz">XZ podložka</option>
+                <option value="xy">XY podložka</option>
+                <option value="yz">YZ podložka</option>
+              </select>
+            </label>
+            <label>
+              <span>Natočení X <b id="rotate-x-value">0°</b></span>
+              <input id="rotate-x" type="range" min="-180" max="180" value="0" step="5" />
+            </label>
+            <label>
+              <span>Natočení Y <b id="rotate-y-value">0°</b></span>
+              <input id="rotate-y" type="range" min="-180" max="180" value="0" step="5" />
+            </label>
+            <label>
+              <span>Natočení Z <b id="rotate-z-value">0°</b></span>
+              <input id="rotate-z" type="range" min="-180" max="180" value="0" step="5" />
+            </label>
+            <label>
+              <span>Limit převisu <b id="overhang-value">45°</b></span>
+              <input id="overhang" type="range" min="30" max="70" value="45" step="5" />
+            </label>
+            <button id="align-build-plate" class="secondary-button" type="button">Srovnat na podložku</button>
+          </section>
+
           <section class="actions">
             <button id="preview" class="primary-button" type="button">Přepočítat náhled</button>
             <button id="reset" class="secondary-button" type="button">Reset</button>
@@ -101,6 +134,10 @@
               <div>
                 <dt>Export</dt>
                 <dd id="export-state">Připraveno</dd>
+              </div>
+              <div>
+                <dt>Tisk bez podpor</dt>
+                <dd id="print-state">Nezkontrolováno</dd>
               </div>
             </dl>
           </section>

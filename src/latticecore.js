@@ -11,6 +11,7 @@ const sampleCylinderButton = document.querySelector("#sample-cylinder");
 const previewButton = document.querySelector("#preview");
 const resetButton = document.querySelector("#reset");
 const exportButton = document.querySelector("#export");
+const alignBuildPlateButton = document.querySelector("#align-build-plate");
 const patternSelect = document.querySelector("#pattern");
 const modeButtons = [...document.querySelectorAll("[data-mode]")];
 
@@ -20,6 +21,15 @@ const controlsConfig = {
   wall: document.querySelector("#wall"),
   density: document.querySelector("#density"),
   smooth: document.querySelector("#smooth"),
+};
+
+const printControlsConfig = {
+  support: document.querySelector("#print-support"),
+  plane: document.querySelector("#print-plane"),
+  rotateX: document.querySelector("#rotate-x"),
+  rotateY: document.querySelector("#rotate-y"),
+  rotateZ: document.querySelector("#rotate-z"),
+  overhang: document.querySelector("#overhang"),
 };
 
 const labels = {
@@ -35,6 +45,12 @@ const labels = {
   mode: document.querySelector("#mode-label"),
   pattern: document.querySelector("#pattern-label"),
   warning: document.querySelector("#warning-text"),
+  printSupport: document.querySelector("#print-support-value"),
+  rotateX: document.querySelector("#rotate-x-value"),
+  rotateY: document.querySelector("#rotate-y-value"),
+  rotateZ: document.querySelector("#rotate-z-value"),
+  overhang: document.querySelector("#overhang-value"),
+  printState: document.querySelector("#print-state"),
 };
 
 const state = {
@@ -43,11 +59,13 @@ const state = {
   originalGeometry: null,
   mesh: null,
   volumeGroup: null,
+  supportGroup: null,
   previewTimer: null,
   generatorEnabled: true,
   uploadedStlBuffer: null,
   generationId: 0,
   loadRequestId: 0,
+  printOffset: new THREE.Vector3(),
 };
 
 const scene = new THREE.Scene();
@@ -152,6 +170,24 @@ function bindEvents() {
     });
   });
 
+  Object.values(printControlsConfig).forEach((input) => {
+    input.addEventListener("input", () => {
+      updateLabels();
+      applyPrintTransforms();
+      rebuildPrintSupports();
+      applyPrintTransforms();
+      updateStats();
+    });
+  });
+
+  alignBuildPlateButton.addEventListener("click", () => {
+    alignCurrentObjectToBuildPlate();
+    updateLabels();
+    rebuildPrintSupports();
+    applyPrintTransforms();
+    updateStats();
+  });
+
   modeButtons.forEach((button) => {
     button.addEventListener("click", () => {
       state.mode = button.dataset.mode;
@@ -214,6 +250,7 @@ function loadStlFile(file) {
 
 function setGeometry(geometry, message) {
   state.generationId += 1;
+  state.printOffset.set(0, 0, 0);
   const userData = { ...geometry.userData };
   geometry = geometry.toNonIndexed();
   geometry.userData = { ...geometry.userData, ...userData };
@@ -229,6 +266,7 @@ function setGeometry(geometry, message) {
 
   state.mesh = new THREE.Mesh(state.geometry, surfaceMaterial);
   scene.add(state.mesh);
+  applyPrintTransforms();
   fitCameraToGeometry(state.geometry);
   applyStructure();
   labels.status.textContent = message;
@@ -237,11 +275,13 @@ function setGeometry(geometry, message) {
 function resetGeometry() {
   if (!state.originalGeometry || !state.mesh) return;
   state.generationId += 1;
+  state.printOffset.set(0, 0, 0);
   state.geometry.dispose();
   state.geometry = state.originalGeometry.clone();
   state.mesh.geometry = state.geometry;
   state.mesh.visible = true;
   disposeVolumeGroup();
+  applyPrintTransforms();
   updateStats();
   labels.status.textContent = "Model vrácen do původního stavu.";
 }
@@ -307,6 +347,8 @@ async function applyStructure() {
     }
     state.volumeGroup = nextVolumeGroup;
     scene.add(state.volumeGroup);
+    rebuildPrintSupports();
+    applyPrintTransforms();
     labels.warning.textContent =
       "Plošný režim je teď Voronoi-only: ze seed bodů na povrchu vzniká samostatná síť, původní STL zůstává jen reference.";
   } else {
@@ -319,6 +361,8 @@ async function applyStructure() {
     }
     state.volumeGroup = nextVolumeGroup;
     scene.add(state.volumeGroup);
+    rebuildPrintSupports();
+    applyPrintTransforms();
     labels.warning.textContent =
       "Objemový režim kombinuje povrchovou Voronoi síť a vnitřní seed síť ořezanou tvarem modelu.";
   }
@@ -873,6 +917,7 @@ function addTube(group, start, end, radius) {
 }
 
 function disposeVolumeGroup() {
+  state.supportGroup = null;
   if (!state.volumeGroup) return;
   disposeGroup(state.volumeGroup);
   state.volumeGroup = null;
@@ -880,10 +925,166 @@ function disposeVolumeGroup() {
 
 function disposeGroup(group) {
   if (!group) return;
+  if (group.parent) group.parent.remove(group);
   scene.remove(group);
   group.traverse((object) => {
     if (object.geometry) object.geometry.dispose();
   });
+}
+
+function getPrintSettings() {
+  return {
+    support: Boolean(printControlsConfig.support.checked),
+    plane: printControlsConfig.plane.value,
+    rotateX: Number(printControlsConfig.rotateX.value),
+    rotateY: Number(printControlsConfig.rotateY.value),
+    rotateZ: Number(printControlsConfig.rotateZ.value),
+    overhang: Number(printControlsConfig.overhang.value),
+  };
+}
+
+function getBuildNormal(settings = getPrintSettings()) {
+  if (settings.plane === "xy") return new THREE.Vector3(0, 0, 1);
+  if (settings.plane === "yz") return new THREE.Vector3(1, 0, 0);
+  return new THREE.Vector3(0, 1, 0);
+}
+
+function getPrintEuler(settings = getPrintSettings()) {
+  return new THREE.Euler(
+    THREE.MathUtils.degToRad(settings.rotateX),
+    THREE.MathUtils.degToRad(settings.rotateY),
+    THREE.MathUtils.degToRad(settings.rotateZ),
+    "XYZ"
+  );
+}
+
+function applyPrintTransforms() {
+  const euler = getPrintEuler();
+  for (const object of [state.mesh, state.volumeGroup]) {
+    if (!object) continue;
+    object.rotation.copy(euler);
+    object.position.copy(state.printOffset);
+    object.updateMatrixWorld(true);
+  }
+}
+
+function alignCurrentObjectToBuildPlate() {
+  const object = state.volumeGroup ?? state.mesh;
+  if (!object) return;
+  applyPrintTransforms();
+  const normal = getBuildNormal();
+  const box = new THREE.Box3().setFromObject(object);
+  const corners = [
+    new THREE.Vector3(box.min.x, box.min.y, box.min.z),
+    new THREE.Vector3(box.min.x, box.min.y, box.max.z),
+    new THREE.Vector3(box.min.x, box.max.y, box.min.z),
+    new THREE.Vector3(box.min.x, box.max.y, box.max.z),
+    new THREE.Vector3(box.max.x, box.min.y, box.min.z),
+    new THREE.Vector3(box.max.x, box.min.y, box.max.z),
+    new THREE.Vector3(box.max.x, box.max.y, box.min.z),
+    new THREE.Vector3(box.max.x, box.max.y, box.max.z),
+  ];
+  const minProjection = Math.min(...corners.map((corner) => corner.dot(normal)));
+  state.printOffset.add(normal.multiplyScalar(-minProjection));
+  labels.status.textContent = "Model srovnán na tiskovou rovinu.";
+}
+
+function rebuildPrintSupports() {
+  disposePrintSupportGroup();
+  if (!printControlsConfig.support.checked || !state.volumeGroup) {
+    if (labels.printState) labels.printState.textContent = printControlsConfig.support.checked ? "Bez zásahu" : "Vypnuto";
+    return;
+  }
+
+  const supportGroup = createPrintSupportGroup(state.volumeGroup);
+  if (supportGroup.children.length === 0) {
+    if (labels.printState) labels.printState.textContent = "Bez zásahu";
+    return;
+  }
+
+  state.volumeGroup.add(supportGroup);
+  state.supportGroup = supportGroup;
+  if (labels.printState) labels.printState.textContent = `Přidáno ${supportGroup.children.length}`;
+}
+
+function disposePrintSupportGroup() {
+  if (!state.supportGroup) return;
+  disposeGroup(state.supportGroup);
+  state.supportGroup = null;
+}
+
+function createPrintSupportGroup(sourceGroup) {
+  const settings = getPrintSettings();
+  const supportGroup = new THREE.Group();
+  supportGroup.name = "LatticeCore print supports";
+  const normalWorld = getBuildNormal(settings).normalize();
+  const inverseRotation = new THREE.Quaternion().setFromEuler(getPrintEuler(settings)).invert();
+  const normalLocal = normalWorld.clone().applyQuaternion(inverseRotation).normalize();
+  const baseProjection = getLocalProjectionMin(sourceGroup, normalLocal);
+  const params = getLatticeParams();
+  const radius = Math.max(params.strutDiameter * 0.42, 0.08);
+  const overhangThreshold = -Math.sin(THREE.MathUtils.degToRad(settings.overhang));
+  const box = new THREE.Box3().setFromObject(sourceGroup);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const spacing = Math.max(Math.max(size.x, size.y, size.z) * 0.055, radius * 8);
+  const usedCells = new Set();
+  const maxSupports = 90;
+
+  sourceGroup.updateMatrixWorld(true);
+  sourceGroup.traverse((object) => {
+    if (supportGroup.children.length >= maxSupports) return;
+    if (!object.isMesh || !object.geometry?.attributes?.position) return;
+    if (object.parent?.name === supportGroup.name) return;
+
+    const position = object.geometry.attributes.position;
+    const step = Math.max(1, Math.floor(position.count / 2400));
+    const matrixToGroup = new THREE.Matrix4().copy(sourceGroup.matrixWorld).invert().multiply(object.matrixWorld);
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const c = new THREE.Vector3();
+    const normal = new THREE.Vector3();
+    const center = new THREE.Vector3();
+
+    for (let index = 0; index < position.count - 2 && supportGroup.children.length < maxSupports; index += 3 * step) {
+      a.fromBufferAttribute(position, index).applyMatrix4(matrixToGroup);
+      b.fromBufferAttribute(position, index + 1).applyMatrix4(matrixToGroup);
+      c.fromBufferAttribute(position, index + 2).applyMatrix4(matrixToGroup);
+      normal.crossVectors(new THREE.Vector3().subVectors(b, a), new THREE.Vector3().subVectors(c, a)).normalize();
+      if (normal.dot(normalLocal) >= overhangThreshold) continue;
+
+      center.copy(a).add(b).add(c).multiplyScalar(1 / 3);
+      const height = center.dot(normalLocal) - baseProjection;
+      if (height < radius * 8) continue;
+
+      const key = center.clone().divideScalar(spacing).floor().toArray().join(":");
+      if (usedCells.has(key)) continue;
+      usedCells.add(key);
+
+      const foot = center.clone().addScaledVector(normalLocal, -height);
+      addTube(supportGroup, center, foot, radius);
+    }
+  });
+
+  return supportGroup;
+}
+
+function getLocalProjectionMin(group, normal) {
+  let minProjection = Infinity;
+  group.updateMatrixWorld(true);
+  group.traverse((object) => {
+    if (!object.isMesh || !object.geometry?.attributes?.position) return;
+    if (object.parent?.name === "LatticeCore print supports") return;
+    const position = object.geometry.attributes.position;
+    const matrixToGroup = new THREE.Matrix4().copy(group.matrixWorld).invert().multiply(object.matrixWorld);
+    const point = new THREE.Vector3();
+    const step = Math.max(1, Math.floor(position.count / 800));
+    for (let index = 0; index < position.count; index += step) {
+      point.fromBufferAttribute(position, index).applyMatrix4(matrixToGroup);
+      minProjection = Math.min(minProjection, point.dot(normal));
+    }
+  });
+  return Number.isFinite(minProjection) ? minProjection : 0;
 }
 
 function getSeedSalt() {
@@ -907,11 +1108,17 @@ function mulberry32(seed) {
 
 function updateLabels() {
   const params = getLatticeParams();
+  const print = getPrintSettings();
   labels.cellSize.textContent = params.cellCount.toFixed(0);
   labels.depth.textContent = `${params.surfaceOffset.toFixed(1)} mm`;
   labels.wall.textContent = `${params.strutDiameter.toFixed(2)} mm`;
   labels.density.textContent = params.edgeReach.toFixed(1);
   labels.smooth.textContent = params.randomness.toFixed(2);
+  labels.printSupport.textContent = print.support ? "zap" : "vyp";
+  labels.rotateX.textContent = `${print.rotateX.toFixed(0)}°`;
+  labels.rotateY.textContent = `${print.rotateY.toFixed(0)}°`;
+  labels.rotateZ.textContent = `${print.rotateZ.toFixed(0)}°`;
+  labels.overhang.textContent = `${print.overhang.toFixed(0)}°`;
   labels.mode.textContent = state.mode === "surface" ? "Plošný režim" : "Objemový lattice";
   labels.pattern.textContent = patternSelect.options[patternSelect.selectedIndex].text;
 }
@@ -931,6 +1138,9 @@ function updateStats() {
       ? "Povrchová síť STL"
       : "Lattice STL"
     : "Pozastaveno";
+  if (labels.printState && !state.supportGroup) {
+    labels.printState.textContent = printControlsConfig.support.checked ? "Bez zásahu" : "Vypnuto";
+  }
 }
 
 function countTriangles(object) {

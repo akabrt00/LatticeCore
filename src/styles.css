@@ -223,6 +223,17 @@ h1 {
   color: #dce6eb;
 }
 
+.controls .toggle-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.controls .toggle-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
 .field select {
   min-height: 38px;
   border: 1px solid var(--line);
@@ -246,6 +257,11 @@ h1 {
 input[type="range"] {
   width: 100%;
   accent-color: var(--accent);
+}
+
+#align-build-plate {
+  width: 100%;
+  margin-top: 14px;
 }
 
 .actions {
