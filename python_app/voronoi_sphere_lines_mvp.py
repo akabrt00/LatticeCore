@@ -37,6 +37,51 @@ def generate_points_in_box(n: int, half_size: float, random_seed: int = 42) -> n
     return rng.uniform(-half_size, half_size, size=(n, 3))
 
 
+def load_input_body_mesh(input_stl: str) -> pv.PolyData:
+    """Load an STL body, center it like the web preview, and return a closed surface mesh."""
+    mesh = pv.read(input_stl).extract_surface().triangulate().clean()
+    if mesh.n_points == 0 or mesh.n_cells == 0:
+        raise ValueError(f"Input STL is empty: {input_stl}")
+
+    center = np.asarray(mesh.center, dtype=float)
+    mesh.translate(-center, inplace=True)
+    return mesh
+
+
+def mesh_contains_points(mesh: pv.PolyData, points: np.ndarray) -> np.ndarray:
+    """Return a boolean mask for points inside a closed PyVista surface."""
+    if len(points) == 0:
+        return np.asarray([], dtype=bool)
+
+    point_cloud = pv.PolyData(points)
+    selected = point_cloud.select_enclosed_points(mesh, tolerance=1e-5, check_surface=False)
+    return selected.point_data["SelectedPoints"].astype(bool)
+
+
+def generate_points_in_mesh(mesh: pv.PolyData, n: int, random_seed: int = 42) -> np.ndarray:
+    """Generate n random points inside an arbitrary STL body."""
+    rng = np.random.default_rng(random_seed)
+    bounds = np.asarray(mesh.bounds, dtype=float)
+    mins = np.asarray([bounds[0], bounds[2], bounds[4]])
+    maxs = np.asarray([bounds[1], bounds[3], bounds[5]])
+    points: list[np.ndarray] = []
+    batch_size = max(256, n * 8)
+
+    for _ in range(120):
+        candidates = rng.uniform(mins, maxs, size=(batch_size, 3))
+        inside = mesh_contains_points(mesh, candidates)
+        points.extend(candidates[inside])
+        if len(points) >= n:
+            return np.asarray(points[:n])
+
+    if len(points) < 5:
+        raise ValueError(
+            "Could not sample enough points inside the imported STL. "
+            "The model may be open/non-watertight or too thin for volume lattice generation."
+        )
+    return np.asarray(points[:n])
+
+
 def generate_body_points(shape: str, n: int, radius: float, random_seed: int) -> np.ndarray:
     """Generate points inside the selected implicit body."""
     if shape == "box":
@@ -98,6 +143,28 @@ def filter_edges_inside_box(
     return filtered_edges
 
 
+def filter_edges_inside_mesh(
+    edges: list[tuple[np.ndarray, np.ndarray]],
+    mesh: pv.PolyData,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Keep only edges whose endpoints and midpoint are inside an imported mesh."""
+    if not edges:
+        return []
+
+    samples = []
+    for start, end in edges:
+        samples.extend((start, end, (start + end) * 0.5))
+
+    inside = mesh_contains_points(mesh, np.asarray(samples))
+    filtered_edges: list[tuple[np.ndarray, np.ndarray]] = []
+    for edge_index, edge in enumerate(edges):
+        offset = edge_index * 3
+        if bool(inside[offset]) and bool(inside[offset + 1]) and bool(inside[offset + 2]):
+            filtered_edges.append(edge)
+
+    return filtered_edges
+
+
 def filter_edges_inside_body(
     shape: str,
     edges: list[tuple[np.ndarray, np.ndarray]],
@@ -134,6 +201,23 @@ def optimize_strut_network(
     else:
         optimized_edges = inside_edges
 
+    stats = OptimizationStats(
+        raw_edges=len(edges),
+        inside_edges=len(inside_edges),
+        removed_short_edges=len(inside_edges) - len(optimized_edges),
+    )
+    return optimized_edges, stats
+
+
+def optimize_mesh_strut_network(
+    edges: list[tuple[np.ndarray, np.ndarray]],
+    mesh: pv.PolyData,
+    min_length: float,
+    enabled: bool,
+) -> tuple[list[tuple[np.ndarray, np.ndarray]], OptimizationStats]:
+    """Clip Voronoi edges to an imported body mesh and remove tiny struts."""
+    inside_edges = filter_edges_inside_mesh(edges, mesh)
+    optimized_edges = filter_edges_by_length(inside_edges, min_length) if enabled else inside_edges
     stats = OptimizationStats(
         raw_edges=len(edges),
         inside_edges=len(inside_edges),
@@ -504,10 +588,98 @@ def create_surface_shell(
     return create_surface_voronoi_shell(radius, surface_seed_count, tube_radius, random_seed), []
 
 
+def sample_points_on_mesh_surface(
+    mesh: pv.PolyData,
+    count: int,
+    random_seed: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Area-weighted random points on a triangulated mesh surface with face normals."""
+    rng = np.random.default_rng(random_seed)
+    faces = mesh.faces.reshape((-1, 4))[:, 1:4]
+    vertices = np.asarray(mesh.points)
+    triangles = vertices[faces]
+
+    vectors_a = triangles[:, 1] - triangles[:, 0]
+    vectors_b = triangles[:, 2] - triangles[:, 0]
+    cross = np.cross(vectors_a, vectors_b)
+    areas = np.linalg.norm(cross, axis=1) * 0.5
+    valid = areas > 1e-12
+    if not np.any(valid):
+        raise ValueError("Input STL has no usable triangle surface area.")
+
+    faces = faces[valid]
+    triangles = triangles[valid]
+    cross = cross[valid]
+    areas = areas[valid]
+    normals = cross / np.linalg.norm(cross, axis=1)[:, None]
+    probabilities = areas / areas.sum()
+    chosen = rng.choice(len(triangles), size=count, replace=True, p=probabilities)
+    chosen_triangles = triangles[chosen]
+
+    u = rng.random(count)
+    v = rng.random(count)
+    flip = u + v > 1.0
+    u[flip] = 1.0 - u[flip]
+    v[flip] = 1.0 - v[flip]
+    points = chosen_triangles[:, 0] + u[:, None] * (chosen_triangles[:, 1] - chosen_triangles[:, 0]) + v[:, None] * (
+        chosen_triangles[:, 2] - chosen_triangles[:, 0]
+    )
+    return points, normals[chosen]
+
+
+def create_mesh_surface_lattice_edges(
+    mesh: pv.PolyData,
+    surface_seed_count: int,
+    random_seed: int,
+    min_edge_length: float,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Create a local Voronoi-like surface network that follows an imported STL body."""
+    surface_points, normals = sample_points_on_mesh_surface(mesh, max(surface_seed_count, 12), random_seed)
+    bounds = np.asarray(mesh.bounds, dtype=float)
+    extents = np.asarray([bounds[1] - bounds[0], bounds[3] - bounds[2], bounds[5] - bounds[4]])
+    diagonal = float(np.linalg.norm(extents)) or 1.0
+    max_distance = diagonal * float(np.clip(3.0 / np.sqrt(len(surface_points)), 0.075, 0.24))
+    neighbor_count = 4
+    edges: list[tuple[np.ndarray, np.ndarray]] = []
+    seen_edges: set[tuple[int, int]] = set()
+
+    for index, point in enumerate(surface_points):
+        distances = np.linalg.norm(surface_points - point, axis=1)
+        nearest_indices = np.argsort(distances)[1 : neighbor_count + 1]
+        for nearest_index in nearest_indices:
+            distance = float(distances[nearest_index])
+            if distance < min_edge_length or distance > max_distance:
+                continue
+            if float(np.dot(normals[index], normals[nearest_index])) < -0.2:
+                continue
+
+            key = tuple(sorted((index, int(nearest_index))))
+            if key in seen_edges:
+                continue
+            seen_edges.add(key)
+            edges.append((point, surface_points[nearest_index]))
+
+    return edges
+
+
+def create_mesh_surface_shell(
+    mesh: pv.PolyData,
+    surface_seed_count: int,
+    tube_radius: float,
+    random_seed: int,
+    min_edge_length: float,
+) -> tuple[pv.PolyData, list[tuple[np.ndarray, np.ndarray]]]:
+    """Create a tube shell that follows an imported STL surface."""
+    surface_edges = create_mesh_surface_lattice_edges(mesh, surface_seed_count, random_seed, min_edge_length)
+    return create_tube_mesh(surface_edges, tube_radius).clean(), surface_edges
+
+
 def resolve_surface_seed_count(shape: str, requested_surface_points: int, inner_seed_count: int) -> int:
     """Choose surface density from inner density unless the user overrides it."""
     if requested_surface_points > 0:
         return requested_surface_points
+    if shape == "mesh":
+        return int(np.clip(round(inner_seed_count * 1.15), 48, 320))
     if shape == "box":
         return int(np.clip(round(inner_seed_count * 0.85), 36, 240))
     return int(np.clip(round(inner_seed_count * 0.7), 24, 180))
@@ -592,6 +764,39 @@ def create_box_connection_edges(
     return connector_edges
 
 
+def create_mesh_connection_edges(
+    inside_edges: list[tuple[np.ndarray, np.ndarray]],
+    surface_edges: list[tuple[np.ndarray, np.ndarray]],
+    max_length: float,
+    min_length: float,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Connect near-boundary inner endpoints to the closest imported-surface lattice nodes."""
+    surface_points = unique_edge_points(surface_edges)
+    inner_points = unique_edge_points(inside_edges)
+    if not surface_points or not inner_points:
+        return []
+
+    surface_array = np.asarray(surface_points)
+    connector_edges: list[tuple[np.ndarray, np.ndarray]] = []
+    seen_edges: set[tuple[tuple[float, float, float], tuple[float, float, float]]] = set()
+
+    for inner_point in inner_points:
+        distances = np.linalg.norm(surface_array - inner_point, axis=1)
+        nearest_index = int(np.argmin(distances))
+        length = float(distances[nearest_index])
+        if length < min_length or length > max_length:
+            continue
+
+        nearest_surface = surface_array[nearest_index]
+        key = edge_key_3d(inner_point, nearest_surface)
+        if key in seen_edges:
+            continue
+        seen_edges.add(key)
+        connector_edges.append((inner_point, nearest_surface))
+
+    return connector_edges
+
+
 def create_connection_edges(
     shape: str,
     inside_edges: list[tuple[np.ndarray, np.ndarray]],
@@ -602,6 +807,8 @@ def create_connection_edges(
     min_length: float,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
     """Create connection struts between inner lattice and surface network."""
+    if shape == "mesh":
+        return create_mesh_connection_edges(inside_edges, surface_edges, max_length, min_length)
     if shape != "box" or not surface_edges:
         return []
     return create_box_connection_edges(inside_edges, surface_edges, radius, boundary_band, max_length, min_length)
@@ -792,6 +999,7 @@ def show_scene(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Voronoi tube MVP")
     parser.add_argument("--shape", choices=["sphere", "box"], default="box", help="Implicit body shape.")
+    parser.add_argument("--input-stl", default="", help="Optional STL body used for clipping and surface lattice.")
     parser.add_argument("--points", type=int, default=80, help="Number of random seed points inside the body.")
     parser.add_argument("--radius", type=float, default=1.0, help="Sphere radius or box half-size.")
     parser.add_argument("--tube-radius", type=float, default=0.025, help="Radius of generated tube struts.")
@@ -856,26 +1064,53 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    points = generate_body_points(args.shape, args.points, args.radius, args.random_seed)
+    body_mesh = load_input_body_mesh(args.input_stl) if args.input_stl else None
+    shape = "mesh" if body_mesh is not None else args.shape
+    if body_mesh is not None:
+        bounds = np.asarray(body_mesh.bounds, dtype=float)
+        extents = np.asarray([bounds[1] - bounds[0], bounds[3] - bounds[2], bounds[5] - bounds[4]])
+        body_radius = float(np.max(extents) * 0.5) or args.radius
+        points = generate_points_in_mesh(body_mesh, args.points, args.random_seed)
+    else:
+        body_radius = args.radius
+        points = generate_body_points(shape, args.points, body_radius, args.random_seed)
+
     edges = compute_voronoi_edges(points)
-    min_strut_length = 0.0 if args.no_optimize else args.min_strut_length * args.radius
-    connector_min_length = 0.0 if args.no_optimize else args.connector_min_length * args.radius
-    surface_seed_count = resolve_surface_seed_count(args.shape, args.surface_points, args.points)
-    inside_edges, optimization_stats = optimize_strut_network(
-        args.shape,
-        edges,
-        args.radius,
-        min_strut_length,
-        enabled=not args.no_optimize,
-    )
+    min_strut_length = 0.0 if args.no_optimize else args.min_strut_length * body_radius
+    connector_min_length = 0.0 if args.no_optimize else args.connector_min_length * body_radius
+    surface_seed_count = resolve_surface_seed_count(shape, args.surface_points, args.points)
+    if body_mesh is not None:
+        inside_edges, optimization_stats = optimize_mesh_strut_network(
+            edges,
+            body_mesh,
+            min_strut_length,
+            enabled=not args.no_optimize,
+        )
+    else:
+        inside_edges, optimization_stats = optimize_strut_network(
+            shape,
+            edges,
+            body_radius,
+            min_strut_length,
+            enabled=not args.no_optimize,
+        )
+
     tube_mesh = create_tube_mesh(inside_edges, args.tube_radius)
     if args.no_shell:
         shell_mesh = pv.PolyData()
         surface_edges: list[tuple[np.ndarray, np.ndarray]] = []
+    elif body_mesh is not None:
+        shell_mesh, surface_edges = create_mesh_surface_shell(
+            body_mesh,
+            surface_seed_count,
+            args.surface_tube_radius,
+            args.random_seed + 1000,
+            min_strut_length,
+        )
     else:
         shell_mesh, surface_edges = create_surface_shell(
-            args.shape,
-            args.radius,
+            shape,
+            body_radius,
             surface_seed_count,
             args.surface_tube_radius,
             args.random_seed + 1000,
@@ -883,23 +1118,23 @@ def main() -> None:
         )
 
     connector_edges = create_connection_edges(
-        args.shape,
+        shape,
         inside_edges,
         surface_edges,
-        args.radius,
-        args.connector_band * args.radius,
-        args.connector_max_length * args.radius,
+        body_radius,
+        args.connector_band * body_radius,
+        args.connector_max_length * body_radius,
         connector_min_length,
     )
     support_edges = (
         []
-        if args.no_supports or args.shape != "box"
+        if args.no_supports or shape != "box"
         else create_dangling_support_edges(
             inside_edges + connector_edges,
             surface_edges,
-            args.radius,
+            body_radius,
             connector_min_length,
-            args.support_max_length * args.radius,
+            args.support_max_length * body_radius,
         )
     )
     connector_mesh = create_tube_mesh(connector_edges + support_edges, args.tube_radius)
@@ -931,7 +1166,7 @@ def main() -> None:
         export_stl(export_mesh, args.export_stl)
 
     if not args.no_show:
-        show_scene(args.shape, points, inside_edges, tube_mesh, connector_mesh, shell_mesh, node_mesh, debug=args.debug)
+        show_scene(shape, points, inside_edges, tube_mesh, connector_mesh, shell_mesh, node_mesh, debug=args.debug)
 
 
 if __name__ == "__main__":

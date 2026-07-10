@@ -45,6 +45,7 @@ const state = {
   volumeGroup: null,
   previewTimer: null,
   generatorEnabled: true,
+  uploadedStlBuffer: null,
 };
 
 const scene = new THREE.Scene();
@@ -173,12 +174,14 @@ function syncModeButtons() {
 }
 
 function loadSampleCube() {
+  state.uploadedStlBuffer = null;
   const geometry = new THREE.BoxGeometry(40, 40, 40, 72, 72, 72);
   geometry.userData.latticeShape = "box";
   setGeometry(geometry, "Ukázková kostka je připravená.");
 }
 
 function loadSampleCylinder() {
+  state.uploadedStlBuffer = null;
   const geometry = new THREE.CylinderGeometry(16, 16, 46, 72, 18, false);
   geometry.userData.latticeShape = "cylinder";
   setGeometry(geometry, "Ukázkový válec je připravený.");
@@ -191,6 +194,7 @@ function loadStlFile(file) {
       const loader = new STLLoader();
       const geometry = loader.parse(reader.result);
       geometry.userData.latticeShape = "mesh";
+      state.uploadedStlBuffer = reader.result.slice(0);
       geometry.computeVertexNormals();
       setGeometry(geometry, `Načteno: ${file.name}`);
     } catch (error) {
@@ -436,7 +440,11 @@ function createSurfaceEdges(samples, bbox) {
 }
 
 async function createVolumeLattice(sourceGeometry) {
-  if (sourceGeometry.userData?.latticeShape === "box") {
+  const canUsePythonGenerator =
+    sourceGeometry.userData?.latticeShape === "box" ||
+    (sourceGeometry.userData?.latticeShape === "mesh" && state.uploadedStlBuffer);
+
+  if (canUsePythonGenerator) {
     try {
       return await createPythonVolumeLattice(sourceGeometry);
     } catch (error) {
@@ -501,8 +509,16 @@ async function createPythonVolumeLattice(sourceGeometry) {
     seed: String(Math.round(42 + params.randomness * 1000 + params.edgeReach * 31)),
   });
 
-  labels.status.textContent = "Python generuje Voronoi STL...";
-  const response = await fetch(`/api/python-lattice?${query.toString()}`, { cache: "no-store" });
+  const hasUploadedMesh = sourceGeometry.userData?.latticeShape === "mesh" && state.uploadedStlBuffer;
+  labels.status.textContent = hasUploadedMesh
+    ? "Python generuje lattice podle nahraneho STL..."
+    : "Python generuje Voronoi STL...";
+  const response = await fetch(`/api/python-lattice?${query.toString()}`, {
+    method: hasUploadedMesh ? "POST" : "GET",
+    headers: hasUploadedMesh ? { "Content-Type": "model/stl" } : undefined,
+    body: hasUploadedMesh ? state.uploadedStlBuffer : undefined,
+    cache: "no-store",
+  });
   if (!response.ok) {
     const message = await response.text();
     throw new Error(message);

@@ -30,6 +30,15 @@ function runPythonGenerator(args) {
   });
 }
 
+function readRequestBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
 function latticePythonPlugin() {
   return {
     name: "latticecore-python-generator",
@@ -42,11 +51,11 @@ function latticePythonPlugin() {
           const radius = Number(requestUrl.searchParams.get("radius") ?? 20);
           const tubeRadius = Number(requestUrl.searchParams.get("tubeRadius") ?? 0.225);
           const seed = Number(requestUrl.searchParams.get("seed") ?? 42);
+          const isUploadedMeshRequest = req.method === "POST";
+          const inputPath = path.join(rootDir, "exports", "web_lattice_input.stl");
 
-          await runPythonGenerator([
+          const generatorArgs = [
             "python_app/voronoi_sphere_lines_mvp.py",
-            "--shape",
-            "box",
             "--points",
             String(Math.round(points)),
             "--radius",
@@ -62,7 +71,20 @@ function latticePythonPlugin() {
             "--no-show",
             "--export-stl",
             outputPath,
-          ]);
+          ];
+
+          if (isUploadedMeshRequest) {
+            const inputStl = await readRequestBody(req);
+            if (inputStl.length === 0) {
+              throw new Error("Uploaded STL request body is empty.");
+            }
+            await fs.writeFile(inputPath, inputStl);
+            generatorArgs.splice(1, 0, "--input-stl", inputPath);
+          } else {
+            generatorArgs.splice(1, 0, "--shape", "box");
+          }
+
+          await runPythonGenerator(generatorArgs);
 
           const stl = await fs.readFile(outputPath);
           res.statusCode = 200;
