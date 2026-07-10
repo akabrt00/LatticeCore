@@ -51,6 +51,7 @@ function latticePythonPlugin() {
           const radius = Number(requestUrl.searchParams.get("radius") ?? 20);
           const tubeRadius = Number(requestUrl.searchParams.get("tubeRadius") ?? 0.225);
           const seed = Number(requestUrl.searchParams.get("seed") ?? 42);
+          const surfaceOnly = requestUrl.searchParams.get("surfaceOnly") === "true";
           const isUploadedMeshRequest = req.method === "POST";
           const inputPath = path.join(rootDir, "exports", "web_lattice_input.stl");
 
@@ -72,6 +73,9 @@ function latticePythonPlugin() {
             "--export-stl",
             outputPath,
           ];
+          if (surfaceOnly) {
+            generatorArgs.push("--surface-only");
+          }
 
           if (isUploadedMeshRequest) {
             const inputStl = await readRequestBody(req);

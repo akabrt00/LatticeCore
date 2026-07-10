@@ -286,7 +286,10 @@ async function applyStructure() {
   if (state.mode === "surface") {
     state.mesh.visible = true;
     disposeVolumeGroup();
-    state.volumeGroup = createSurfaceLattice(state.originalGeometry);
+    state.volumeGroup =
+      state.originalGeometry.userData?.latticeShape === "mesh" && state.uploadedStlBuffer
+        ? await createPythonVolumeLattice(state.originalGeometry, { surfaceOnly: true })
+        : createSurfaceLattice(state.originalGeometry);
     scene.add(state.volumeGroup);
     labels.warning.textContent =
       "Plošný režim je teď Voronoi-only: ze seed bodů na povrchu vzniká samostatná síť, původní STL zůstává jen reference.";
@@ -495,7 +498,7 @@ async function createVolumeLattice(sourceGeometry) {
   return group;
 }
 
-async function createPythonVolumeLattice(sourceGeometry) {
+async function createPythonVolumeLattice(sourceGeometry, options = {}) {
   const bbox = sourceGeometry.boundingBox ?? new THREE.Box3().setFromBufferAttribute(sourceGeometry.attributes.position);
   const size = new THREE.Vector3();
   bbox.getSize(size);
@@ -508,10 +511,13 @@ async function createPythonVolumeLattice(sourceGeometry) {
     tubeRadius: String(Math.max(params.strutDiameter * 0.5, maxAxis * 0.0045)),
     seed: String(Math.round(42 + params.randomness * 1000 + params.edgeReach * 31)),
   });
+  if (options.surfaceOnly) query.set("surfaceOnly", "true");
 
   const hasUploadedMesh = sourceGeometry.userData?.latticeShape === "mesh" && state.uploadedStlBuffer;
   labels.status.textContent = hasUploadedMesh
-    ? "Python generuje lattice podle nahraneho STL..."
+    ? options.surfaceOnly
+      ? "Python generuje povrchovou sit podle nahraneho STL..."
+      : "Python generuje lattice podle nahraneho STL..."
     : "Python generuje Voronoi STL...";
   const response = await fetch(`/api/python-lattice?${query.toString()}`, {
     method: hasUploadedMesh ? "POST" : "GET",
@@ -531,7 +537,7 @@ async function createPythonVolumeLattice(sourceGeometry) {
 
   const mesh = new THREE.Mesh(geometry, latticeMaterial);
   const group = new THREE.Group();
-  group.name = "LatticeCore Python volume lattice";
+  group.name = options.surfaceOnly ? "LatticeCore Python surface lattice" : "LatticeCore Python volume lattice";
   group.add(mesh);
   group.userData.optimization = {
     pythonGenerator: true,

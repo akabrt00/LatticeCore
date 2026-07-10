@@ -633,33 +633,61 @@ def create_mesh_surface_lattice_edges(
     random_seed: int,
     min_edge_length: float,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
-    """Create a local Voronoi-like surface network that follows an imported STL body."""
-    surface_points, normals = sample_points_on_mesh_surface(mesh, max(surface_seed_count, 12), random_seed)
+    """Create a surface network from local STL triangle adjacency, never across open air."""
+    del random_seed
+    faces = mesh.faces.reshape((-1, 4))[:, 1:4]
+    vertices = np.asarray(mesh.points)
     bounds = np.asarray(mesh.bounds, dtype=float)
     extents = np.asarray([bounds[1] - bounds[0], bounds[3] - bounds[2], bounds[5] - bounds[4]])
-    diagonal = float(np.linalg.norm(extents)) or 1.0
-    max_distance = diagonal * float(np.clip(3.0 / np.sqrt(len(surface_points)), 0.075, 0.24))
-    neighbor_count = 4
-    edges: list[tuple[np.ndarray, np.ndarray]] = []
-    seen_edges: set[tuple[int, int]] = set()
+    max_extent = float(np.max(extents)) or 1.0
+    base_spacing = max_extent * float(np.clip(1.15 / np.sqrt(max(surface_seed_count, 1)), 0.055, 0.14))
 
-    for index, point in enumerate(surface_points):
-        distances = np.linalg.norm(surface_points - point, axis=1)
-        nearest_indices = np.argsort(distances)[1 : neighbor_count + 1]
-        for nearest_index in nearest_indices:
-            distance = float(distances[nearest_index])
-            if distance < min_edge_length or distance > max_distance:
-                continue
-            if float(np.dot(normals[index], normals[nearest_index])) < -0.2:
-                continue
+    for spacing_scale in (1.0, 0.75, 0.55):
+        spacing = max(base_spacing * spacing_scale, min_edge_length * 1.25, 1e-6)
+        cluster_sums: dict[tuple[int, int, int], np.ndarray] = {}
+        cluster_counts: dict[tuple[int, int, int], int] = {}
+        vertex_keys: list[tuple[int, int, int]] = []
 
-            key = tuple(sorted((index, int(nearest_index))))
-            if key in seen_edges:
-                continue
-            seen_edges.add(key)
-            edges.append((point, surface_points[nearest_index]))
+        for vertex in vertices:
+            key = tuple(np.floor(vertex / spacing).astype(int))
+            vertex_keys.append(key)
+            cluster_sums[key] = cluster_sums.get(key, np.zeros(3)) + vertex
+            cluster_counts[key] = cluster_counts.get(key, 0) + 1
 
-    return edges
+        cluster_points = {
+            key: cluster_sums[key] / cluster_counts[key]
+            for key in cluster_sums
+        }
+        edge_keys: set[tuple[tuple[int, int, int], tuple[int, int, int]]] = set()
+
+        for face in faces:
+            for first_index, second_index in (
+                (int(face[0]), int(face[1])),
+                (int(face[1]), int(face[2])),
+                (int(face[2]), int(face[0])),
+            ):
+                first_key = vertex_keys[first_index]
+                second_key = vertex_keys[second_index]
+                if first_key == second_key:
+                    continue
+
+                edge_key = (first_key, second_key) if first_key <= second_key else (second_key, first_key)
+                edge_keys.add(edge_key)
+
+        max_edge_length = spacing * 2.6
+        surface_edges: list[tuple[np.ndarray, np.ndarray]] = []
+        for first_key, second_key in edge_keys:
+            start = cluster_points[first_key]
+            end = cluster_points[second_key]
+            length = float(np.linalg.norm(end - start))
+            if length < min_edge_length * 0.35 or length > max_edge_length:
+                continue
+            surface_edges.append((start, end))
+
+        if len(surface_edges) >= max(18, int(surface_seed_count * 0.85)):
+            return surface_edges
+
+    return surface_edges
 
 
 def create_mesh_surface_shell(
@@ -1052,6 +1080,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--random-seed", type=int, default=42, help="Random seed for repeatable results.")
     parser.add_argument("--debug", action="store_true", help="Show original seed points and Voronoi lines.")
     parser.add_argument("--no-shell", action="store_true", help="Export and show only inner Voronoi tubes without surface casing.")
+    parser.add_argument("--surface-only", action="store_true", help="Export only the surface lattice shell.")
     parser.add_argument("--no-show", action="store_true", help="Generate and export without opening a PyVista window.")
     parser.add_argument(
         "--export-stl",
@@ -1070,16 +1099,27 @@ def main() -> None:
         bounds = np.asarray(body_mesh.bounds, dtype=float)
         extents = np.asarray([bounds[1] - bounds[0], bounds[3] - bounds[2], bounds[5] - bounds[4]])
         body_radius = float(np.max(extents) * 0.5) or args.radius
-        points = generate_points_in_mesh(body_mesh, args.points, args.random_seed)
+        points = (
+            np.empty((0, 3))
+            if args.surface_only
+            else generate_points_in_mesh(body_mesh, args.points, args.random_seed)
+        )
     else:
         body_radius = args.radius
-        points = generate_body_points(shape, args.points, body_radius, args.random_seed)
+        points = (
+            np.empty((0, 3))
+            if args.surface_only
+            else generate_body_points(shape, args.points, body_radius, args.random_seed)
+        )
 
-    edges = compute_voronoi_edges(points)
+    edges = [] if args.surface_only else compute_voronoi_edges(points)
     min_strut_length = 0.0 if args.no_optimize else args.min_strut_length * body_radius
     connector_min_length = 0.0 if args.no_optimize else args.connector_min_length * body_radius
     surface_seed_count = resolve_surface_seed_count(shape, args.surface_points, args.points)
-    if body_mesh is not None:
+    if args.surface_only:
+        inside_edges = []
+        optimization_stats = OptimizationStats(raw_edges=0, inside_edges=0, removed_short_edges=0)
+    elif body_mesh is not None:
         inside_edges, optimization_stats = optimize_mesh_strut_network(
             edges,
             body_mesh,
@@ -1117,14 +1157,18 @@ def main() -> None:
             min_strut_length,
         )
 
-    connector_edges = create_connection_edges(
-        shape,
-        inside_edges,
-        surface_edges,
-        body_radius,
-        args.connector_band * body_radius,
-        args.connector_max_length * body_radius,
-        connector_min_length,
+    connector_edges = (
+        []
+        if args.surface_only
+        else create_connection_edges(
+            shape,
+            inside_edges,
+            surface_edges,
+            body_radius,
+            args.connector_band * body_radius,
+            args.connector_max_length * body_radius,
+            connector_min_length,
+        )
     )
     support_edges = (
         []
