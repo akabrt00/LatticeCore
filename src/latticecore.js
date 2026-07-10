@@ -70,7 +70,8 @@ const state = {
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 5000);
-camera.position.set(85, 72, 92);
+camera.up.set(0, 0, 1);
+camera.position.set(85, -92, 72);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -92,7 +93,8 @@ fill.position.set(-90, 40, -80);
 scene.add(fill);
 
 const grid = new THREE.GridHelper(140, 28, 0x3a4550, 0x232b33);
-grid.position.y = -24;
+grid.rotation.x = Math.PI / 2;
+grid.position.z = -24;
 scene.add(grid);
 
 const surfaceMaterial = new THREE.MeshStandardMaterial({
@@ -114,6 +116,8 @@ init();
 
 function init() {
   bindEvents();
+  printControlsConfig.plane.value = "xy";
+  printControlsConfig.support.checked = false;
   const initialOptions = getInitialOptions();
   state.mode = initialOptions.mode;
   syncModeButtons();
@@ -1162,13 +1166,13 @@ function fitCameraToGeometry(geometry) {
   const maxSize = Math.max(size.x, size.y, size.z) || 40;
   const distance = maxSize * 2.4;
 
-  camera.position.set(center.x + distance, center.y + distance * 0.8, center.z + distance);
+  camera.position.set(center.x + distance, center.y - distance * 1.1, center.z + distance * 0.75);
   camera.near = Math.max(distance / 100, 0.1);
   camera.far = distance * 100;
   camera.updateProjectionMatrix();
   orbit.target.copy(center);
   orbit.update();
-  grid.position.y = box.min.y - 4;
+  grid.position.z = box.min.z - 4;
 }
 
 function exportStl() {
