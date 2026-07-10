@@ -46,6 +46,8 @@ const state = {
   previewTimer: null,
   generatorEnabled: true,
   uploadedStlBuffer: null,
+  generationId: 0,
+  loadRequestId: 0,
 };
 
 const scene = new THREE.Scene();
@@ -174,6 +176,7 @@ function syncModeButtons() {
 }
 
 function loadSampleCube() {
+  state.loadRequestId += 1;
   state.uploadedStlBuffer = null;
   const geometry = new THREE.BoxGeometry(40, 40, 40, 72, 72, 72);
   geometry.userData.latticeShape = "box";
@@ -181,6 +184,7 @@ function loadSampleCube() {
 }
 
 function loadSampleCylinder() {
+  state.loadRequestId += 1;
   state.uploadedStlBuffer = null;
   const geometry = new THREE.CylinderGeometry(16, 16, 46, 72, 18, false);
   geometry.userData.latticeShape = "cylinder";
@@ -188,8 +192,11 @@ function loadSampleCylinder() {
 }
 
 function loadStlFile(file) {
+  const loadRequestId = (state.loadRequestId += 1);
   const reader = new FileReader();
   reader.onload = () => {
+    if (loadRequestId !== state.loadRequestId) return;
+
     try {
       const loader = new STLLoader();
       const geometry = loader.parse(reader.result);
@@ -206,6 +213,7 @@ function loadStlFile(file) {
 }
 
 function setGeometry(geometry, message) {
+  state.generationId += 1;
   const userData = { ...geometry.userData };
   geometry = geometry.toNonIndexed();
   geometry.userData = { ...geometry.userData, ...userData };
@@ -228,6 +236,7 @@ function setGeometry(geometry, message) {
 
 function resetGeometry() {
   if (!state.originalGeometry || !state.mesh) return;
+  state.generationId += 1;
   state.geometry.dispose();
   state.geometry = state.originalGeometry.clone();
   state.mesh.geometry = state.geometry;
@@ -270,6 +279,7 @@ function applySafeStructure() {
 
 async function applyStructure() {
   if (!state.originalGeometry || !state.mesh) return;
+  const generationId = (state.generationId += 1);
   window.clearTimeout(state.previewTimer);
   state.previewTimer = null;
   labels.status.textContent = "Přepočítávám náhled...";
@@ -281,22 +291,33 @@ async function applyStructure() {
       ? "Povrchový režim vytváří samostatnou Voronoi/lattice síť nad skutečným povrchem modelu."
       : "Objemový režim kombinuje povrchovou Voronoi síť a rychlý tvarový odhad vnitřní lattice výplně.";
 
+  if (generationId !== state.generationId) return;
   state.geometry.computeVertexNormals();
   state.geometry.computeBoundingBox();
   if (state.mode === "surface") {
     state.mesh.visible = true;
     disposeVolumeGroup();
-    state.volumeGroup =
+    const nextVolumeGroup =
       state.originalGeometry.userData?.latticeShape === "mesh" && state.uploadedStlBuffer
         ? await createPythonVolumeLattice(state.originalGeometry, { surfaceOnly: true })
         : createSurfaceLattice(state.originalGeometry);
+    if (generationId !== state.generationId) {
+      disposeGroup(nextVolumeGroup);
+      return;
+    }
+    state.volumeGroup = nextVolumeGroup;
     scene.add(state.volumeGroup);
     labels.warning.textContent =
       "Plošný režim je teď Voronoi-only: ze seed bodů na povrchu vzniká samostatná síť, původní STL zůstává jen reference.";
   } else {
     state.mesh.visible = true;
     disposeVolumeGroup();
-    state.volumeGroup = await createVolumeLattice(state.originalGeometry);
+    const nextVolumeGroup = await createVolumeLattice(state.originalGeometry);
+    if (generationId !== state.generationId) {
+      disposeGroup(nextVolumeGroup);
+      return;
+    }
+    state.volumeGroup = nextVolumeGroup;
     scene.add(state.volumeGroup);
     labels.warning.textContent =
       "Objemový režim kombinuje povrchovou Voronoi síť a vnitřní seed síť ořezanou tvarem modelu.";
@@ -853,11 +874,16 @@ function addTube(group, start, end, radius) {
 
 function disposeVolumeGroup() {
   if (!state.volumeGroup) return;
-  scene.remove(state.volumeGroup);
-  state.volumeGroup.traverse((object) => {
+  disposeGroup(state.volumeGroup);
+  state.volumeGroup = null;
+}
+
+function disposeGroup(group) {
+  if (!group) return;
+  scene.remove(group);
+  group.traverse((object) => {
     if (object.geometry) object.geometry.dispose();
   });
-  state.volumeGroup = null;
 }
 
 function getSeedSalt() {
