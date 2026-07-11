@@ -1035,12 +1035,12 @@ function createPrintSupportGroup(sourceGroup) {
     .sort((a, b) => b.projection - a.projection);
   const usedCells = new Set();
   const maxSupports = 96;
-  const maxNodeSupports = 42;
+  const maxNodeSupports = 68;
   const minDrop = Math.max(radius * 5, spacing * 0.18);
-  const maxLength = Math.max(spacing * 2.25, radius * 18);
+  const maxLength = Math.max(spacing * 2.9, radius * 22);
   const minPrintableRise = Math.sin(THREE.MathUtils.degToRad(38));
   const minProjection = candidates.reduce((lowest, candidate) => Math.min(lowest, candidate.projection), Infinity);
-  const nodeCellSize = Math.max(spacing * 0.78, radius * 9);
+  const nodeCellSize = Math.max(spacing * 0.66, radius * 8);
   const faceCellSize = Math.max(spacing * 0.62, radius * 8);
 
   sourceGroup.updateMatrixWorld(true);
@@ -1092,6 +1092,9 @@ function createPrintSupportGroup(sourceGroup) {
     if (supportGroup.children.length >= maxSupports) break;
     if (nodeSupports >= maxNodeSupports) break;
     if (candidate.projection - minProjection < minDrop * 1.35) continue;
+    if (hasExistingLowerSupport(candidate, candidates, normalLocal, minDrop, Math.max(radius * 4, spacing * 0.18), minPrintableRise)) {
+      continue;
+    }
 
     const key = candidate.point.clone().divideScalar(nodeCellSize).floor().toArray().join(":");
     if (usedCells.has(key)) continue;
@@ -1124,18 +1127,47 @@ function collectSelfSupportCandidates(group, normal, mergeDistance) {
     const position = object.geometry.attributes.position;
     const matrixToGroup = new THREE.Matrix4().copy(group.matrixWorld).invert().multiply(object.matrixWorld);
     const point = new THREE.Vector3();
-    const step = Math.max(1, Math.floor(position.count / 2400));
+    const step = Math.max(1, Math.floor(position.count / 9000));
     for (let index = 0; index < position.count; index += step) {
       point.fromBufferAttribute(position, index).applyMatrix4(matrixToGroup);
       const key = point.clone().divideScalar(mergeDistance).floor().toArray().join(":");
-      if (candidatesByKey.has(key)) continue;
-      candidatesByKey.set(key, {
-        point: point.clone(),
-        projection: point.dot(normal),
-      });
+      if (!candidatesByKey.has(key)) {
+        candidatesByKey.set(key, {
+          point: new THREE.Vector3(),
+          count: 0,
+        });
+      }
+      const candidate = candidatesByKey.get(key);
+      candidate.point.add(point);
+      candidate.count += 1;
     }
   });
-  return [...candidatesByKey.values()];
+  return [...candidatesByKey.values()]
+    .filter((candidate) => candidate.count >= 2)
+    .map((candidate) => {
+      candidate.point.multiplyScalar(1 / candidate.count);
+      candidate.projection = candidate.point.dot(normal);
+      return candidate;
+    });
+}
+
+function hasExistingLowerSupport(node, candidates, normal, minDrop, maxLateral, minPrintableRise) {
+  for (const candidate of candidates) {
+    const drop = node.projection - candidate.projection;
+    if (drop < minDrop * 0.65) continue;
+
+    const direction = new THREE.Vector3().subVectors(node.point, candidate.point);
+    const length = direction.length();
+    if (length < minDrop) continue;
+
+    const riseRatio = Math.abs(direction.dot(normal)) / length;
+    if (riseRatio < minPrintableRise) continue;
+
+    const lateral = Math.sqrt(Math.max(length * length - drop * drop, 0));
+    if (lateral <= maxLateral) return true;
+  }
+
+  return false;
 }
 
 function findSelfSupportAnchor(center, centerProjection, candidates, normal, minDrop, maxLength, minPrintableRise) {
