@@ -412,6 +412,8 @@ function createSurfaceLattice(sourceGeometry) {
     edges: edges.length,
     removedEdges: rawEdges.length - edges.length,
   };
+  group.userData.latticeNodes = samples.map((sample) => sample.position.clone());
+  group.userData.latticeEdges = edges.map(([aIndex, bIndex]) => [aIndex, bIndex]);
 
   for (const [aIndex, bIndex] of edges) {
     addTube(group, samples[aIndex].position, samples[bIndex].position, radius);
@@ -542,6 +544,11 @@ async function createVolumeLattice(sourceGeometry) {
   const rawEdges = createNearestEdges(points, maxAxis, params.edgeReach, sourceGeometry);
   const edges = filterIndexedEdgesByLength(rawEdges, points, getMinimumStrutLength(bbox, radius));
   const surfaceOptimization = surfaceGroup.userData.optimization ?? {};
+  const surfaceNodes = surfaceGroup.userData.latticeNodes ?? [];
+  const surfaceEdges = surfaceGroup.userData.latticeEdges ?? [];
+  const latticeNodes = [...surfaceNodes.map((point) => point.clone()), ...points.map((point) => point.clone())];
+  const surfaceNodeOffset = 0;
+  const innerNodeOffset = surfaceNodes.length;
   group.userData.optimization = {
     rawNodes: rawPoints.length,
     nodes: points.length,
@@ -552,6 +559,11 @@ async function createVolumeLattice(sourceGeometry) {
     surfaceRemovedNodes: surfaceOptimization.removedNodes ?? 0,
     surfaceRemovedEdges: surfaceOptimization.removedEdges ?? 0,
   };
+  group.userData.latticeNodes = latticeNodes;
+  group.userData.latticeEdges = [
+    ...surfaceEdges.map(([aIndex, bIndex]) => [aIndex + surfaceNodeOffset, bIndex + surfaceNodeOffset]),
+    ...edges.map(([aIndex, bIndex]) => [aIndex + innerNodeOffset, bIndex + innerNodeOffset]),
+  ];
 
   for (const [aIndex, bIndex] of edges) {
     addTube(group, points[aIndex], points[bIndex], radius);
@@ -1031,8 +1043,8 @@ function createPrintSupportGroup(sourceGroup) {
   const size = new THREE.Vector3();
   box.getSize(size);
   const spacing = Math.max(Math.max(size.x, size.y, size.z) * 0.055, radius * 8);
-  const candidates = collectSelfSupportCandidates(sourceGroup, normalLocal, Math.max(radius * 2.2, spacing * 0.18))
-    .sort((a, b) => b.projection - a.projection);
+  const candidateData = getSelfSupportCandidateData(sourceGroup, normalLocal, Math.max(radius * 2.2, spacing * 0.18));
+  const candidates = candidateData.candidates.sort((a, b) => b.projection - a.projection);
   const usedCells = new Set();
   const maxSupports = 96;
   const maxNodeSupports = 68;
@@ -1074,7 +1086,7 @@ function createPrintSupportGroup(sourceGroup) {
       const anchor = findSelfSupportAnchor(
         center,
         centerProjection,
-        candidates,
+        candidateData.anchorCandidates,
         normalLocal,
         minDrop,
         maxLength,
@@ -1091,6 +1103,7 @@ function createPrintSupportGroup(sourceGroup) {
   for (const candidate of candidates) {
     if (supportGroup.children.length >= maxSupports) break;
     if (nodeSupports >= maxNodeSupports) break;
+    if (candidate.weight < candidateData.strongWeight) continue;
     if (candidate.projection - minProjection < minDrop * 1.35) continue;
     if (hasExistingLowerSupport(candidate, candidates, normalLocal, minDrop, Math.max(radius * 4, spacing * 0.18), minPrintableRise)) {
       continue;
@@ -1102,7 +1115,7 @@ function createPrintSupportGroup(sourceGroup) {
     const anchor = findSelfSupportAnchor(
       candidate.point,
       candidate.projection,
-      candidates,
+      candidateData.anchorCandidates,
       normalLocal,
       minDrop,
       maxLength,
@@ -1116,6 +1129,38 @@ function createPrintSupportGroup(sourceGroup) {
   }
 
   return supportGroup;
+}
+
+function getSelfSupportCandidateData(group, normal, mergeDistance) {
+  const metadataCandidates = collectMetadataSelfSupportCandidates(group, normal);
+  if (metadataCandidates.length > 0) {
+    return {
+      candidates: metadataCandidates,
+      anchorCandidates: metadataCandidates,
+      strongWeight: 1,
+    };
+  }
+
+  const candidates = collectSelfSupportCandidates(group, normal, mergeDistance);
+  const weights = candidates.map((candidate) => candidate.weight).sort((a, b) => a - b);
+  const strongWeight = weights.length > 0 ? weights[Math.floor(weights.length * 0.62)] : 1;
+  const strongWeightFloor = Math.max(strongWeight, 2);
+  const anchorCandidates = candidates.filter((candidate) => candidate.weight >= strongWeightFloor);
+  return {
+    candidates,
+    anchorCandidates: anchorCandidates.length > 0 ? anchorCandidates : candidates,
+    strongWeight: strongWeightFloor,
+  };
+}
+
+function collectMetadataSelfSupportCandidates(group, normal) {
+  const nodes = group.userData?.latticeNodes;
+  if (!Array.isArray(nodes) || nodes.length === 0) return [];
+  return nodes.map((point) => ({
+    point: point.clone(),
+    projection: point.dot(normal),
+    weight: 999,
+  }));
 }
 
 function collectSelfSupportCandidates(group, normal, mergeDistance) {
@@ -1147,6 +1192,7 @@ function collectSelfSupportCandidates(group, normal, mergeDistance) {
     .map((candidate) => {
       candidate.point.multiplyScalar(1 / candidate.count);
       candidate.projection = candidate.point.dot(normal);
+      candidate.weight = candidate.count;
       return candidate;
     });
 }
