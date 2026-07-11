@@ -112,6 +112,12 @@ const latticeMaterial = new THREE.MeshStandardMaterial({
   roughness: 0.46,
 });
 
+const supportMaterial = new THREE.MeshStandardMaterial({
+  color: 0x4fd2c5,
+  metalness: 0.1,
+  roughness: 0.5,
+});
+
 init();
 
 function init() {
@@ -914,13 +920,13 @@ function addBoundingFrame(group, bbox, radius) {
   for (const [a, b] of edges) addTube(group, corners[a], corners[b], radius);
 }
 
-function addTube(group, start, end, radius) {
+function addTube(group, start, end, radius, material = latticeMaterial) {
   const direction = new THREE.Vector3().subVectors(end, start);
   const length = direction.length();
   if (length < 0.001) return;
 
   const geometry = new THREE.CylinderGeometry(radius, radius, length, 10, 1, false);
-  const tube = new THREE.Mesh(geometry, latticeMaterial);
+  const tube = new THREE.Mesh(geometry, material);
   const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
   const quaternion = new THREE.Quaternion().setFromUnitVectors(
     new THREE.Vector3(0, 1, 0),
@@ -1033,6 +1039,11 @@ function createPrintSupportGroup(sourceGroup) {
   const settings = getPrintSettings();
   const supportGroup = new THREE.Group();
   supportGroup.name = "LatticeCore self-support struts";
+  supportGroup.userData.supportStats = {
+    risks: 0,
+    unresolved: 0,
+    source: "mesh",
+  };
   const normalWorld = getBuildNormal(settings).normalize();
   const inverseRotation = new THREE.Quaternion().setFromEuler(getPrintEuler(settings)).invert();
   const normalLocal = normalWorld.clone().applyQuaternion(inverseRotation).normalize();
@@ -1045,6 +1056,7 @@ function createPrintSupportGroup(sourceGroup) {
   const spacing = Math.max(Math.max(size.x, size.y, size.z) * 0.055, radius * 8);
   const candidateData = getSelfSupportCandidateData(sourceGroup, normalLocal, Math.max(radius * 2.2, spacing * 0.18));
   const candidates = candidateData.candidates.sort((a, b) => b.projection - a.projection);
+  supportGroup.userData.supportStats.source = candidateData.source;
   const usedCells = new Set();
   const maxSupports = 96;
   const maxNodeSupports = 68;
@@ -1076,6 +1088,7 @@ function createPrintSupportGroup(sourceGroup) {
       c.fromBufferAttribute(position, index + 2).applyMatrix4(matrixToGroup);
       normal.crossVectors(new THREE.Vector3().subVectors(b, a), new THREE.Vector3().subVectors(c, a)).normalize();
       if (normal.dot(normalLocal) >= overhangThreshold) continue;
+      supportGroup.userData.supportStats.risks += 1;
 
       center.copy(a).add(b).add(c).multiplyScalar(1 / 3);
       const centerProjection = center.dot(normalLocal);
@@ -1092,10 +1105,13 @@ function createPrintSupportGroup(sourceGroup) {
         maxLength,
         minPrintableRise,
       );
-      if (!anchor) continue;
+      if (!anchor) {
+        supportGroup.userData.supportStats.unresolved += 1;
+        continue;
+      }
 
       usedCells.add(key);
-      addTube(supportGroup, center, anchor, radius);
+      addTube(supportGroup, center, anchor, radius, supportMaterial);
     }
   });
 
@@ -1105,9 +1121,20 @@ function createPrintSupportGroup(sourceGroup) {
     if (nodeSupports >= maxNodeSupports) break;
     if (candidate.weight < candidateData.strongWeight) continue;
     if (candidate.projection - minProjection < minDrop * 1.35) continue;
-    if (hasExistingLowerSupport(candidate, candidates, normalLocal, minDrop, Math.max(radius * 4, spacing * 0.18), minPrintableRise)) {
+    if (
+      hasExistingLowerSupport(
+        candidate,
+        candidates,
+        normalLocal,
+        minDrop,
+        Math.max(radius * 4, spacing * 0.18),
+        minPrintableRise,
+        candidateData.edgeMap,
+      )
+    ) {
       continue;
     }
+    supportGroup.userData.supportStats.risks += 1;
 
     const key = candidate.point.clone().divideScalar(nodeCellSize).floor().toArray().join(":");
     if (usedCells.has(key)) continue;
@@ -1121,10 +1148,13 @@ function createPrintSupportGroup(sourceGroup) {
       maxLength,
       minPrintableRise,
     );
-    if (!anchor) continue;
+    if (!anchor) {
+      supportGroup.userData.supportStats.unresolved += 1;
+      continue;
+    }
 
     usedCells.add(key);
-    addTube(supportGroup, candidate.point, anchor, radius);
+    addTube(supportGroup, candidate.point, anchor, radius, supportMaterial);
     nodeSupports += 1;
   }
 
@@ -1137,6 +1167,8 @@ function getSelfSupportCandidateData(group, normal, mergeDistance) {
     return {
       candidates: metadataCandidates,
       anchorCandidates: metadataCandidates,
+      edgeMap: createMetadataEdgeMap(group.userData?.latticeEdges),
+      source: "graph",
       strongWeight: 1,
     };
   }
@@ -1149,6 +1181,8 @@ function getSelfSupportCandidateData(group, normal, mergeDistance) {
   return {
     candidates,
     anchorCandidates: anchorCandidates.length > 0 ? anchorCandidates : candidates,
+    edgeMap: null,
+    source: "mesh",
     strongWeight: strongWeightFloor,
   };
 }
@@ -1156,11 +1190,24 @@ function getSelfSupportCandidateData(group, normal, mergeDistance) {
 function collectMetadataSelfSupportCandidates(group, normal) {
   const nodes = group.userData?.latticeNodes;
   if (!Array.isArray(nodes) || nodes.length === 0) return [];
-  return nodes.map((point) => ({
+  return nodes.map((point, index) => ({
+    id: index,
     point: point.clone(),
     projection: point.dot(normal),
     weight: 999,
   }));
+}
+
+function createMetadataEdgeMap(edges) {
+  if (!Array.isArray(edges)) return null;
+  const edgeMap = new Map();
+  for (const [start, end] of edges) {
+    if (!edgeMap.has(start)) edgeMap.set(start, new Set());
+    if (!edgeMap.has(end)) edgeMap.set(end, new Set());
+    edgeMap.get(start).add(end);
+    edgeMap.get(end).add(start);
+  }
+  return edgeMap;
 }
 
 function collectSelfSupportCandidates(group, normal, mergeDistance) {
@@ -1197,8 +1244,13 @@ function collectSelfSupportCandidates(group, normal, mergeDistance) {
     });
 }
 
-function hasExistingLowerSupport(node, candidates, normal, minDrop, maxLateral, minPrintableRise) {
-  for (const candidate of candidates) {
+function hasExistingLowerSupport(node, candidates, normal, minDrop, maxLateral, minPrintableRise, edgeMap = null) {
+  const linkedIds = edgeMap && node.id != null ? edgeMap.get(node.id) : null;
+  const candidatesToCheck = linkedIds
+    ? candidates.filter((candidate) => linkedIds.has(candidate.id))
+    : candidates;
+
+  for (const candidate of candidatesToCheck) {
     const drop = node.projection - candidate.projection;
     if (drop < minDrop * 0.65) continue;
 
