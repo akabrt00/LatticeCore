@@ -16,6 +16,7 @@ class OptimizationStats:
     raw_edges: int
     inside_edges: int
     removed_short_edges: int
+    collapsed_short_edges: int = 0
 
 
 def generate_points_in_sphere(n: int, radius: float, random_seed: int = 42) -> np.ndarray:
@@ -202,6 +203,89 @@ def filter_edges_by_length(
     return [(start, end) for start, end in edges if np.linalg.norm(end - start) >= min_length]
 
 
+def collapse_short_edge_nodes(
+    edges: list[tuple[np.ndarray, np.ndarray]],
+    min_length: float,
+    max_iterations: int = 4,
+    decimals: int = 6,
+) -> tuple[list[tuple[np.ndarray, np.ndarray]], int]:
+    """Replace tiny struts by merging their endpoints into a shared median node."""
+    if min_length <= 0 or not edges:
+        return edges, 0
+
+    current_edges = edges
+    collapsed_total = 0
+
+    for _ in range(max_iterations):
+        points_by_key: dict[tuple[float, float, float], np.ndarray] = {}
+        parent: dict[tuple[float, float, float], tuple[float, float, float]] = {}
+
+        def key_for(point: np.ndarray) -> tuple[float, float, float]:
+            return tuple(np.round(point, decimals))
+
+        def ensure(point: np.ndarray) -> tuple[float, float, float]:
+            key = key_for(point)
+            points_by_key.setdefault(key, point)
+            parent.setdefault(key, key)
+            return key
+
+        def find(key: tuple[float, float, float]) -> tuple[float, float, float]:
+            root = key
+            while parent[root] != root:
+                root = parent[root]
+            while parent[key] != key:
+                next_key = parent[key]
+                parent[key] = root
+                key = next_key
+            return root
+
+        def union(first: tuple[float, float, float], second: tuple[float, float, float]) -> None:
+            first_root = find(first)
+            second_root = find(second)
+            if first_root != second_root:
+                parent[second_root] = first_root
+
+        short_edges = 0
+        for start, end in current_edges:
+            start_key = ensure(start)
+            end_key = ensure(end)
+            if float(np.linalg.norm(end - start)) < min_length:
+                union(start_key, end_key)
+                short_edges += 1
+
+        if short_edges == 0:
+            break
+
+        components: dict[tuple[float, float, float], list[np.ndarray]] = {}
+        for key, point in points_by_key.items():
+            components.setdefault(find(key), []).append(point)
+
+        merged_points = {
+            root: np.median(np.asarray(component_points), axis=0)
+            for root, component_points in components.items()
+        }
+
+        rebuilt_edges: list[tuple[np.ndarray, np.ndarray]] = []
+        seen_edges: set[tuple[tuple[float, float, float], tuple[float, float, float]]] = set()
+        for start, end in current_edges:
+            merged_start = merged_points[find(key_for(start))]
+            merged_end = merged_points[find(key_for(end))]
+            if np.linalg.norm(merged_end - merged_start) < min_length:
+                continue
+            start_key = key_for(merged_start)
+            end_key = key_for(merged_end)
+            edge_key = (start_key, end_key) if start_key <= end_key else (end_key, start_key)
+            if edge_key in seen_edges:
+                continue
+            seen_edges.add(edge_key)
+            rebuilt_edges.append((merged_start, merged_end))
+
+        current_edges = rebuilt_edges
+        collapsed_total += short_edges
+
+    return current_edges, collapsed_total
+
+
 def optimize_strut_network(
     shape: str,
     edges: list[tuple[np.ndarray, np.ndarray]],
@@ -212,14 +296,18 @@ def optimize_strut_network(
     """Clip Voronoi edges to the body and remove tiny struts."""
     inside_edges = filter_edges_inside_body(shape, edges, radius)
     if enabled:
-        optimized_edges = filter_edges_by_length(inside_edges, min_length)
+        collapsed_edges, collapsed_short_edges = collapse_short_edge_nodes(inside_edges, min_length)
+        reclipped_edges = filter_edges_inside_body(shape, collapsed_edges, radius)
+        optimized_edges = filter_edges_by_length(reclipped_edges, min_length)
     else:
+        collapsed_short_edges = 0
         optimized_edges = inside_edges
 
     stats = OptimizationStats(
         raw_edges=len(edges),
         inside_edges=len(inside_edges),
         removed_short_edges=len(inside_edges) - len(optimized_edges),
+        collapsed_short_edges=collapsed_short_edges,
     )
     return optimized_edges, stats
 
@@ -232,11 +320,18 @@ def optimize_mesh_strut_network(
 ) -> tuple[list[tuple[np.ndarray, np.ndarray]], OptimizationStats]:
     """Clip Voronoi edges to an imported body mesh and remove tiny struts."""
     inside_edges = filter_edges_inside_mesh(edges, mesh)
-    optimized_edges = filter_edges_by_length(inside_edges, min_length) if enabled else inside_edges
+    if enabled:
+        collapsed_edges, collapsed_short_edges = collapse_short_edge_nodes(inside_edges, min_length)
+        reclipped_edges = filter_edges_inside_mesh(collapsed_edges, mesh)
+        optimized_edges = filter_edges_by_length(reclipped_edges, min_length)
+    else:
+        collapsed_short_edges = 0
+        optimized_edges = inside_edges
     stats = OptimizationStats(
         raw_edges=len(edges),
         inside_edges=len(inside_edges),
         removed_short_edges=len(inside_edges) - len(optimized_edges),
+        collapsed_short_edges=collapsed_short_edges,
     )
     return optimized_edges, stats
 
@@ -586,6 +681,7 @@ def create_box_surface_voronoi_shell(
 ) -> tuple[pv.PolyData, list[tuple[np.ndarray, np.ndarray]]]:
     """Create a cube casing with Voronoi-like tube cells on each face."""
     surface_edges = create_box_surface_voronoi_edges(half_size, surface_seed_count, random_seed, min_edge_length)
+    surface_edges, _ = collapse_short_edge_nodes(surface_edges, min_edge_length)
     return create_tube_mesh(surface_edges, tube_radius).clean(), surface_edges
 
 
@@ -741,6 +837,7 @@ def create_mesh_surface_shell(
 ) -> tuple[pv.PolyData, list[tuple[np.ndarray, np.ndarray]]]:
     """Create a tube shell that follows an imported STL surface."""
     surface_edges = create_mesh_surface_lattice_edges(mesh, surface_seed_count, random_seed, min_edge_length)
+    surface_edges, _ = collapse_short_edge_nodes(surface_edges, min_edge_length)
     return create_tube_mesh(surface_edges, tube_radius).clean(), surface_edges
 
 
@@ -1095,6 +1192,7 @@ def print_mesh_summary(
         f"raw_edges={optimization_stats.raw_edges} "
         f"body_edges={optimization_stats.inside_edges} "
         f"removed_short_edges={optimization_stats.removed_short_edges} "
+        f"collapsed_short_edges={optimization_stats.collapsed_short_edges} "
         f"inside_edges={len(edges)} "
         f"connector_edges={len(connector_edges)} "
         f"support_edges={len(support_edges)} "
