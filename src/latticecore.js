@@ -51,6 +51,9 @@ const labels = {
   rotateZ: document.querySelector("#rotate-z-value"),
   overhang: document.querySelector("#overhang-value"),
   printState: document.querySelector("#print-state"),
+  printIslands: document.querySelector("#print-islands"),
+  printFixed: document.querySelector("#print-fixed"),
+  printStruts: document.querySelector("#print-struts"),
 };
 
 const state = {
@@ -60,6 +63,7 @@ const state = {
   mesh: null,
   volumeGroup: null,
   supportGroup: null,
+  printDiagnosticGroup: null,
   previewTimer: null,
   generatorEnabled: true,
   uploadedStlBuffer: null,
@@ -116,6 +120,18 @@ const supportMaterial = new THREE.MeshStandardMaterial({
   color: 0x4fd2c5,
   metalness: 0.1,
   roughness: 0.5,
+});
+
+const riskMaterial = new THREE.MeshStandardMaterial({
+  color: 0xff3f55,
+  metalness: 0.02,
+  roughness: 0.5,
+});
+
+const anchorMaterial = new THREE.MeshStandardMaterial({
+  color: 0x3d8bff,
+  metalness: 0.08,
+  roughness: 0.48,
 });
 
 init();
@@ -938,8 +954,20 @@ function addTube(group, start, end, radius, material = latticeMaterial) {
   group.add(tube);
 }
 
+function addSupportStrut(group, start, end, radius) {
+  addTube(group, start, end, radius, supportMaterial);
+  const nodeGeometry = new THREE.SphereGeometry(radius * 1.18, 10, 8);
+  const startNode = new THREE.Mesh(nodeGeometry, supportMaterial);
+  startNode.position.copy(start);
+  group.add(startNode);
+  const endNode = new THREE.Mesh(nodeGeometry.clone(), supportMaterial);
+  endNode.position.copy(end);
+  group.add(endNode);
+}
+
 function disposeVolumeGroup() {
   state.supportGroup = null;
+  disposePrintDiagnosticGroup();
   if (!state.volumeGroup) return;
   disposeGroup(state.volumeGroup);
   state.volumeGroup = null;
@@ -982,7 +1010,7 @@ function getPrintEuler(settings = getPrintSettings()) {
 
 function applyPrintTransforms() {
   const euler = getPrintEuler();
-  for (const object of [state.mesh, state.volumeGroup]) {
+  for (const object of [state.mesh, state.volumeGroup, state.printDiagnosticGroup]) {
     if (!object) continue;
     object.rotation.copy(euler);
     object.position.copy(state.printOffset);
@@ -1013,20 +1041,34 @@ function alignCurrentObjectToBuildPlate() {
 
 function rebuildPrintSupports() {
   disposePrintSupportGroup();
-  if (!printControlsConfig.support.checked || !state.volumeGroup) {
-    if (labels.printState) labels.printState.textContent = printControlsConfig.support.checked ? "Bez zásahu" : "Vypnuto";
+  disposePrintDiagnosticGroup();
+  if (!state.volumeGroup) {
+    updatePrintAnalysisLabels(null, 0);
     return;
   }
 
-  const supportGroup = createPrintSupportGroup(state.volumeGroup);
+  const analysis = analyzeLayerPrintability(state.volumeGroup);
+  const diagnosticGroup = createPrintDiagnosticGroup(analysis);
+  if (diagnosticGroup.children.length > 0) {
+    state.printDiagnosticGroup = diagnosticGroup;
+    scene.add(diagnosticGroup);
+  }
+
+  if (!printControlsConfig.support.checked) {
+    updatePrintAnalysisLabels(analysis, 0);
+    return;
+  }
+
+  const supportGroup = createPrintSupportGroup(state.volumeGroup, analysis);
   if (supportGroup.children.length === 0) {
-    if (labels.printState) labels.printState.textContent = "Bez zásahu";
+    updatePrintAnalysisLabels(analysis, 0);
     return;
   }
 
   state.volumeGroup.add(supportGroup);
   state.supportGroup = supportGroup;
-  if (labels.printState) labels.printState.textContent = `Přidáno ${supportGroup.children.length}`;
+  const finalAnalysis = analyzeLayerPrintability(state.volumeGroup, { includeSupports: true });
+  updatePrintAnalysisLabels(finalAnalysis, supportGroup.userData.supportStats?.addedStruts ?? supportGroup.children.length);
 }
 
 function disposePrintSupportGroup() {
@@ -1035,7 +1077,261 @@ function disposePrintSupportGroup() {
   state.supportGroup = null;
 }
 
-function createPrintSupportGroup(sourceGroup) {
+function disposePrintDiagnosticGroup() {
+  if (!state.printDiagnosticGroup) return;
+  disposeGroup(state.printDiagnosticGroup);
+  state.printDiagnosticGroup = null;
+}
+
+function updatePrintAnalysisLabels(analysis, addedStruts) {
+  const islands = analysis?.islands ?? 0;
+  const fixed = analysis?.regions?.filter((region) => region.anchor).length ?? 0;
+  const unresolved = Math.max((analysis?.regions?.length ?? 0) - fixed, 0);
+  if (labels.printIslands) labels.printIslands.textContent = String(islands);
+  if (labels.printFixed) labels.printFixed.textContent = String(fixed);
+  if (labels.printStruts) labels.printStruts.textContent = String(addedStruts);
+  if (!labels.printState) return;
+
+  if (!analysis) {
+    labels.printState.textContent = printControlsConfig.support.checked ? "Bez zásahu" : "Vypnuto";
+  } else if (analysis.regions.length === 0) {
+    labels.printState.textContent = "Bez zjištěných nepodepřených oblastí";
+  } else if (unresolved > 0) {
+    labels.printState.textContent = `Rizika ${analysis.regions.length}, nevyřešeno ${unresolved}`;
+  } else if (printControlsConfig.support.checked) {
+    labels.printState.textContent = `Přidáno ${addedStruts} prutů`;
+  } else {
+    labels.printState.textContent = `Analýza: ${analysis.regions.length} oblastí`;
+  }
+}
+
+function createPrintDiagnosticGroup(analysis) {
+  const group = new THREE.Group();
+  group.name = "LatticeCore printability diagnostics";
+  if (!analysis) return group;
+
+  const riskGeometry = new THREE.SphereGeometry(analysis.markerRadius, 10, 8);
+  const anchorGeometry = new THREE.SphereGeometry(analysis.markerRadius * 0.85, 10, 8);
+  const limit = 140;
+  for (const region of analysis.regions.slice(0, limit)) {
+    const risk = new THREE.Mesh(riskGeometry, riskMaterial);
+    risk.position.copy(region.target);
+    group.add(risk);
+
+    if (region.anchor) {
+      const anchor = new THREE.Mesh(anchorGeometry, anchorMaterial);
+      anchor.position.copy(region.anchor);
+      group.add(anchor);
+    }
+  }
+  return group;
+}
+
+function analyzeLayerPrintability(sourceGroup, options = {}) {
+  const settings = getPrintSettings();
+  const normalWorld = getBuildNormal(settings).normalize();
+  const inverseRotation = new THREE.Quaternion().setFromEuler(getPrintEuler(settings)).invert();
+  const normal = normalWorld.clone().applyQuaternion(inverseRotation).normalize();
+  const params = getLatticeParams();
+  const box = new THREE.Box3().setFromObject(sourceGroup);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const maxAxis = Math.max(size.x, size.y, size.z) || 1;
+  const averageRadius = Math.max(params.strutDiameter * 0.5, maxAxis * 0.0045);
+  const layerHeight = Math.max(0.18, Math.min(0.32, averageRadius * 0.8));
+  const cellSize = Math.max(averageRadius * 2.4, layerHeight * 1.8);
+  const maxAngleFromVerticalDeg = THREE.MathUtils.clamp(settings.overhang, 25, 75);
+  const dilationRadius = layerHeight * Math.tan(THREE.MathUtils.degToRad(maxAngleFromVerticalDeg));
+  const dilationCells = Math.max(1, Math.ceil(dilationRadius / cellSize));
+  const basis = createPrintBasis(normal);
+  const points = collectPrintAnalysisPoints(sourceGroup, normal, basis, cellSize, options);
+
+  if (points.length === 0) {
+    return {
+      islands: 0,
+      regions: [],
+      markerRadius: Math.max(averageRadius * 1.7, 0.55),
+      layerHeight,
+      dilationRadius,
+    };
+  }
+
+  const minProjection = Math.min(...points.map((point) => point.z));
+  const layers = new Map();
+  for (const point of points) {
+    const layer = Math.max(0, Math.floor((point.z - minProjection) / layerHeight));
+    const ix = Math.round(point.x / cellSize);
+    const iy = Math.round(point.y / cellSize);
+    const key = `${ix}:${iy}`;
+    if (!layers.has(layer)) layers.set(layer, new Map());
+    const layerCells = layers.get(layer);
+    if (!layerCells.has(key)) {
+      layerCells.set(key, { ix, iy, layer, points: [], supported: false });
+    }
+    layerCells.get(key).points.push(point.position);
+  }
+
+  const layerIds = [...layers.keys()].sort((a, b) => a - b);
+  let previousSupported = new Map();
+  const unsupportedCells = [];
+  const supportedAnchorPoints = [];
+
+  for (const layer of layerIds) {
+    const layerCells = layers.get(layer);
+    const currentSupported = new Map();
+    for (const [key, cell] of layerCells) {
+      const onBuildPlate = layer === layerIds[0];
+      const supported = onBuildPlate || hasDilatedSupport(cell, previousSupported, dilationCells);
+      cell.supported = supported;
+      const point = averageVectors(cell.points);
+      if (supported) {
+        currentSupported.set(key, cell);
+        supportedAnchorPoints.push(point);
+      } else {
+        unsupportedCells.push({ ...cell, point });
+      }
+    }
+    previousSupported = currentSupported;
+  }
+
+  const regions = groupUnsupportedLayerCells(unsupportedCells, normal);
+  const candidateData = getSelfSupportCandidateData(sourceGroup, normal, Math.max(averageRadius * 2.2, cellSize * 0.55));
+  const anchorPool = [
+    ...candidateData.anchorCandidates.map((candidate) => candidate.point),
+    ...supportedAnchorPoints,
+  ];
+  const maxSupportLength = Math.max(maxAxis * 0.32, averageRadius * 20);
+  const minSupportAngleFromPlate = 90 - maxAngleFromVerticalDeg;
+
+  for (const region of regions) {
+    region.anchor = findLayerSupportAnchor(region.target, anchorPool, normal, minSupportAngleFromPlate, maxSupportLength);
+  }
+
+  return {
+    islands: regions.length,
+    regions,
+    markerRadius: Math.max(averageRadius * 1.7, 0.55),
+    layerHeight,
+    dilationRadius,
+  };
+}
+
+function createPrintBasis(normal) {
+  const helper = Math.abs(normal.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+  const u = new THREE.Vector3().crossVectors(helper, normal).normalize();
+  const v = new THREE.Vector3().crossVectors(normal, u).normalize();
+  return { u, v };
+}
+
+function collectPrintAnalysisPoints(group, normal, basis, cellSize, options = {}) {
+  const samples = [];
+  group.updateMatrixWorld(true);
+  group.traverse((object) => {
+    if (!object.isMesh || !object.geometry?.attributes?.position) return;
+    if (!options.includeSupports && object.parent?.name === "LatticeCore self-support struts") return;
+    const position = object.geometry.attributes.position;
+    const matrixToGroup = new THREE.Matrix4().copy(group.matrixWorld).invert().multiply(object.matrixWorld);
+    const point = new THREE.Vector3();
+    const step = Math.max(1, Math.floor(position.count / 18000));
+    for (let index = 0; index < position.count; index += step) {
+      point.fromBufferAttribute(position, index).applyMatrix4(matrixToGroup);
+      samples.push({
+        position: point.clone(),
+        x: point.dot(basis.u),
+        y: point.dot(basis.v),
+        z: point.dot(normal),
+      });
+    }
+  });
+  return samples;
+}
+
+function hasDilatedSupport(cell, previousSupported, dilationCells) {
+  for (let dx = -dilationCells; dx <= dilationCells; dx += 1) {
+    for (let dy = -dilationCells; dy <= dilationCells; dy += 1) {
+      if (dx * dx + dy * dy > dilationCells * dilationCells) continue;
+      if (previousSupported.has(`${cell.ix + dx}:${cell.iy + dy}`)) return true;
+    }
+  }
+  return false;
+}
+
+function groupUnsupportedLayerCells(cells, normal) {
+  const cellMap = new Map();
+  for (const cell of cells) {
+    cell.key = `${cell.layer}:${cell.ix}:${cell.iy}`;
+    cellMap.set(cell.key, cell);
+  }
+
+  const visited = new Set();
+  const regions = [];
+  for (const cell of cells) {
+    if (visited.has(cell.key)) continue;
+    const queue = [cell];
+    const regionCells = [];
+    visited.add(cell.key);
+
+    while (queue.length > 0) {
+      const current = queue.pop();
+      regionCells.push(current);
+      for (let dz = -1; dz <= 1; dz += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          for (let dy = -1; dy <= 1; dy += 1) {
+            if (dx === 0 && dy === 0 && dz === 0) continue;
+            const neighborKey = `${current.layer + dz}:${current.ix + dx}:${current.iy + dy}`;
+            if (visited.has(neighborKey) || !cellMap.has(neighborKey)) continue;
+            visited.add(neighborKey);
+            queue.push(cellMap.get(neighborKey));
+          }
+        }
+      }
+    }
+
+    const points = regionCells.map((item) => item.point);
+    const target = points.reduce((lowest, point) => (point.dot(normal) < lowest.dot(normal) ? point : lowest), points[0]).clone();
+    regions.push({
+      target,
+      cells: regionCells,
+      anchor: null,
+    });
+  }
+
+  return regions.sort((a, b) => a.target.dot(normal) - b.target.dot(normal));
+}
+
+function findLayerSupportAnchor(target, candidates, normal, minSupportAngleFromPlateDeg, maxSupportLength) {
+  let best = null;
+  let bestScore = Infinity;
+  const minRiseRatio = Math.sin(THREE.MathUtils.degToRad(minSupportAngleFromPlateDeg));
+  const targetProjection = target.dot(normal);
+  const seen = new Set();
+
+  for (const candidate of candidates) {
+    const key = candidate.toArray().map((value) => value.toFixed(2)).join(":");
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const drop = targetProjection - candidate.dot(normal);
+    if (drop <= 0.001) continue;
+    const direction = new THREE.Vector3().subVectors(target, candidate);
+    const length = direction.length();
+    if (length <= 0.001 || length > maxSupportLength) continue;
+    const riseRatio = Math.abs(direction.dot(normal)) / length;
+    if (riseRatio < minRiseRatio) continue;
+
+    const lateral = Math.sqrt(Math.max(length * length - drop * drop, 0));
+    const score = length + lateral * 0.35 + (riseRatio - minRiseRatio) * -2;
+    if (score < bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
+  }
+
+  return best ? best.clone() : null;
+}
+
+
+function createPrintSupportGroup(sourceGroup, analysis = null) {
   const settings = getPrintSettings();
   const supportGroup = new THREE.Group();
   supportGroup.name = "LatticeCore self-support struts";
@@ -1043,6 +1339,7 @@ function createPrintSupportGroup(sourceGroup) {
     risks: 0,
     unresolved: 0,
     source: "mesh",
+    addedStruts: 0,
   };
   const normalWorld = getBuildNormal(settings).normalize();
   const inverseRotation = new THREE.Quaternion().setFromEuler(getPrintEuler(settings)).invert();
@@ -1067,9 +1364,23 @@ function createPrintSupportGroup(sourceGroup) {
   const nodeCellSize = Math.max(spacing * 0.66, radius * 8);
   const faceCellSize = Math.max(spacing * 0.62, radius * 8);
 
+  for (const region of analysis?.regions ?? []) {
+    if (supportGroup.userData.supportStats.addedStruts >= maxSupports) break;
+    supportGroup.userData.supportStats.risks += 1;
+    if (!region.anchor) {
+      supportGroup.userData.supportStats.unresolved += 1;
+      continue;
+    }
+    const key = region.target.clone().divideScalar(nodeCellSize).floor().toArray().join(":");
+    if (usedCells.has(key)) continue;
+    usedCells.add(key);
+    addSupportStrut(supportGroup, region.anchor, region.target, radius);
+    supportGroup.userData.supportStats.addedStruts += 1;
+  }
+
   sourceGroup.updateMatrixWorld(true);
   sourceGroup.traverse((object) => {
-    if (supportGroup.children.length >= maxSupports) return;
+    if (supportGroup.userData.supportStats.addedStruts >= maxSupports) return;
     if (!object.isMesh || !object.geometry?.attributes?.position) return;
     if (object.parent?.name === supportGroup.name) return;
 
@@ -1082,7 +1393,7 @@ function createPrintSupportGroup(sourceGroup) {
     const normal = new THREE.Vector3();
     const center = new THREE.Vector3();
 
-    for (let index = 0; index < position.count - 2 && supportGroup.children.length < maxSupports; index += 3 * step) {
+    for (let index = 0; index < position.count - 2 && supportGroup.userData.supportStats.addedStruts < maxSupports; index += 3 * step) {
       a.fromBufferAttribute(position, index).applyMatrix4(matrixToGroup);
       b.fromBufferAttribute(position, index + 1).applyMatrix4(matrixToGroup);
       c.fromBufferAttribute(position, index + 2).applyMatrix4(matrixToGroup);
@@ -1111,13 +1422,14 @@ function createPrintSupportGroup(sourceGroup) {
       }
 
       usedCells.add(key);
-      addTube(supportGroup, center, anchor, radius, supportMaterial);
+      addSupportStrut(supportGroup, anchor, center, radius);
+      supportGroup.userData.supportStats.addedStruts += 1;
     }
   });
 
   let nodeSupports = 0;
   for (const candidate of candidates) {
-    if (supportGroup.children.length >= maxSupports) break;
+    if (supportGroup.userData.supportStats.addedStruts >= maxSupports) break;
     if (nodeSupports >= maxNodeSupports) break;
     if (candidate.weight < candidateData.strongWeight) continue;
     if (candidate.projection - minProjection < minDrop * 1.35) continue;
@@ -1154,7 +1466,8 @@ function createPrintSupportGroup(sourceGroup) {
     }
 
     usedCells.add(key);
-    addTube(supportGroup, candidate.point, anchor, radius, supportMaterial);
+    addSupportStrut(supportGroup, anchor, candidate.point, radius);
+    supportGroup.userData.supportStats.addedStruts += 1;
     nodeSupports += 1;
   }
 
@@ -1344,7 +1657,7 @@ function updateStats() {
       ? "Povrchová síť STL"
       : "Lattice STL"
     : "Pozastaveno";
-  if (labels.printState && !state.supportGroup) {
+  if (labels.printState && !state.supportGroup && !state.printDiagnosticGroup) {
     labels.printState.textContent = printControlsConfig.support.checked ? "Bez zásahu" : "Vypnuto";
   }
 }
