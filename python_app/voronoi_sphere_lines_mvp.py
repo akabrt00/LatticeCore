@@ -165,6 +165,21 @@ def filter_edges_inside_mesh(
     return filtered_edges
 
 
+def edge_stays_inside_mesh(start: np.ndarray, end: np.ndarray, mesh: pv.PolyData) -> bool:
+    """Return True when a connector is likely inside the body volume.
+
+    The surface endpoint can lie exactly on the mesh boundary, so only interior
+    samples along the segment are tested.
+    """
+    samples = np.asarray([
+        start * 0.85 + end * 0.15,
+        start * 0.55 + end * 0.45,
+        start * 0.25 + end * 0.75,
+        end,
+    ])
+    return bool(np.all(mesh_contains_points(mesh, samples)))
+
+
 def filter_edges_inside_body(
     shape: str,
     edges: list[tuple[np.ndarray, np.ndarray]],
@@ -799,22 +814,36 @@ def create_box_connection_edges(
     ]
     connector_edges: list[tuple[np.ndarray, np.ndarray]] = []
     seen_edges: set[tuple[tuple[float, float, float], tuple[float, float, float]]] = set()
+    max_connectors = max(48, min(len(surface_points) * 2, len(inner_points) * 3, 420))
+
+    def add_connector(inner_point: np.ndarray, surface_point: np.ndarray) -> None:
+        if len(connector_edges) >= max_connectors:
+            return
+        length = float(np.linalg.norm(surface_point - inner_point))
+        if length < min_length or length > max_length:
+            return
+
+        key = edge_key_3d(inner_point, surface_point)
+        if key in seen_edges:
+            return
+        seen_edges.add(key)
+        connector_edges.append((inner_point, surface_point))
 
     for inner_point in inner_points:
         face_points = [point for point in surface_points if same_box_face(inner_point, point, half_size)]
         if not face_points:
             continue
+        ranked_surface = sorted(face_points, key=lambda point: float(np.linalg.norm(point - inner_point)))
+        for surface_point in ranked_surface[:2]:
+            add_connector(inner_point, surface_point)
 
-        nearest_surface = min(face_points, key=lambda point: float(np.linalg.norm(point - inner_point)))
-        length = float(np.linalg.norm(nearest_surface - inner_point))
-        if length < min_length or length > max_length:
+    for surface_point in surface_points:
+        face_inner_points = [point for point in inner_points if same_box_face(point, surface_point, half_size)]
+        if not face_inner_points:
             continue
-
-        key = edge_key_3d(inner_point, nearest_surface)
-        if key in seen_edges:
-            continue
-        seen_edges.add(key)
-        connector_edges.append((inner_point, nearest_surface))
+        ranked_inner = sorted(face_inner_points, key=lambda point: float(np.linalg.norm(point - surface_point)))
+        for inner_point in ranked_inner[:2]:
+            add_connector(inner_point, surface_point)
 
     return connector_edges
 
@@ -824,30 +853,59 @@ def create_mesh_connection_edges(
     surface_edges: list[tuple[np.ndarray, np.ndarray]],
     max_length: float,
     min_length: float,
+    mesh: pv.PolyData | None = None,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
-    """Connect near-boundary inner endpoints to the closest imported-surface lattice nodes."""
+    """Create a transition layer between imported-surface and inner lattice nodes."""
     surface_points = unique_edge_points(surface_edges)
     inner_points = unique_edge_points(inside_edges)
     if not surface_points or not inner_points:
         return []
 
     surface_array = np.asarray(surface_points)
+    inner_array = np.asarray(inner_points)
     connector_edges: list[tuple[np.ndarray, np.ndarray]] = []
     seen_edges: set[tuple[tuple[float, float, float], tuple[float, float, float]]] = set()
+    max_connectors = max(64, min(len(surface_points) * 2, len(inner_points) * 3, 480))
+
+    def add_connector(inner_point: np.ndarray, surface_point: np.ndarray) -> bool:
+        if len(connector_edges) >= max_connectors:
+            return False
+        length = float(np.linalg.norm(surface_point - inner_point))
+        if length < min_length or length > max_length:
+            return False
+        if mesh is not None and not edge_stays_inside_mesh(surface_point, inner_point, mesh):
+            return False
+
+        key = edge_key_3d(inner_point, surface_point)
+        if key in seen_edges:
+            return False
+        seen_edges.add(key)
+        connector_edges.append((inner_point, surface_point))
+        return True
 
     for inner_point in inner_points:
         distances = np.linalg.norm(surface_array - inner_point, axis=1)
-        nearest_index = int(np.argmin(distances))
-        length = float(distances[nearest_index])
-        if length < min_length or length > max_length:
-            continue
+        ranked_surface = np.argsort(distances)
+        added_for_inner = 0
+        for surface_index in ranked_surface:
+            if add_connector(inner_point, surface_array[int(surface_index)]):
+                added_for_inner += 1
+            if len(connector_edges) >= max_connectors:
+                return connector_edges
+            if added_for_inner >= 2:
+                break
 
-        nearest_surface = surface_array[nearest_index]
-        key = edge_key_3d(inner_point, nearest_surface)
-        if key in seen_edges:
-            continue
-        seen_edges.add(key)
-        connector_edges.append((inner_point, nearest_surface))
+    for surface_point in surface_points:
+        distances = np.linalg.norm(inner_array - surface_point, axis=1)
+        ranked_inner = np.argsort(distances)
+        added_for_surface = 0
+        for inner_index in ranked_inner:
+            if add_connector(inner_array[int(inner_index)], surface_point):
+                added_for_surface += 1
+            if len(connector_edges) >= max_connectors:
+                return connector_edges
+            if added_for_surface >= 2:
+                break
 
     return connector_edges
 
@@ -860,10 +918,11 @@ def create_connection_edges(
     boundary_band: float,
     max_length: float,
     min_length: float,
+    mesh: pv.PolyData | None = None,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
     """Create connection struts between inner lattice and surface network."""
     if shape == "mesh":
-        return create_mesh_connection_edges(inside_edges, surface_edges, max_length, min_length)
+        return create_mesh_connection_edges(inside_edges, surface_edges, max_length, min_length, mesh)
     if shape != "box" or not surface_edges:
         return []
     return create_box_connection_edges(inside_edges, surface_edges, radius, boundary_band, max_length, min_length)
@@ -1239,6 +1298,7 @@ def main() -> None:
             args.connector_band * body_radius,
             args.connector_max_length * body_radius,
             connector_min_length,
+            body_mesh,
         )
     )
     if body_mesh is not None and not args.surface_only:
