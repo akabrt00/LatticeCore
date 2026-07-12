@@ -1113,7 +1113,7 @@ function createPrintDiagnosticGroup(analysis) {
   const riskGeometry = new THREE.SphereGeometry(analysis.markerRadius, 10, 8);
   const anchorGeometry = new THREE.SphereGeometry(analysis.markerRadius * 0.85, 10, 8);
   const limit = 140;
-  for (const region of analysis.regions.slice(0, limit)) {
+  for (const region of selectRegionsAcrossHeight(analysis.regions, limit)) {
     const risk = new THREE.Mesh(riskGeometry, riskMaterial);
     risk.position.copy(region.target);
     group.add(risk);
@@ -1125,6 +1125,28 @@ function createPrintDiagnosticGroup(analysis) {
     }
   }
   return group;
+}
+
+function selectRegionsAcrossHeight(regions, limit) {
+  if (regions.length <= limit) return regions;
+  const sorted = [...regions].sort((a, b) => a.height - b.height);
+  const selected = [];
+  const used = new Set();
+
+  for (let index = 0; index < limit; index += 1) {
+    const sourceIndex = Math.round((index * (sorted.length - 1)) / Math.max(limit - 1, 1));
+    if (used.has(sourceIndex)) continue;
+    used.add(sourceIndex);
+    selected.push(sorted[sourceIndex]);
+  }
+
+  for (let index = 0; selected.length < limit && index < sorted.length; index += 1) {
+    if (used.has(index)) continue;
+    used.add(index);
+    selected.push(sorted[index]);
+  }
+
+  return selected;
 }
 
 function analyzeLayerPrintability(sourceGroup, options = {}) {
@@ -1293,6 +1315,7 @@ function groupUnsupportedLayerCells(cells, normal) {
       target,
       cells: regionCells,
       anchor: null,
+      height: target.dot(normal),
     });
   }
 
@@ -1364,7 +1387,8 @@ function createPrintSupportGroup(sourceGroup, analysis = null) {
   const nodeCellSize = Math.max(spacing * 0.66, radius * 8);
   const faceCellSize = Math.max(spacing * 0.62, radius * 8);
 
-  for (const region of analysis?.regions ?? []) {
+  const layerSupportRegions = selectSupportRegions(analysis?.regions ?? [], maxSupports);
+  for (const region of layerSupportRegions) {
     if (supportGroup.userData.supportStats.addedStruts >= maxSupports) break;
     supportGroup.userData.supportStats.risks += 1;
     if (!region.anchor) {
@@ -1472,6 +1496,14 @@ function createPrintSupportGroup(sourceGroup, analysis = null) {
   }
 
   return supportGroup;
+}
+
+function selectSupportRegions(regions, limit) {
+  const anchored = regions.filter((region) => region.anchor);
+  const unresolved = regions.filter((region) => !region.anchor);
+  const selected = selectRegionsAcrossHeight(anchored, limit);
+  if (selected.length >= limit) return selected;
+  return [...selected, ...selectRegionsAcrossHeight(unresolved, limit - selected.length)];
 }
 
 function getSelfSupportCandidateData(group, normal, mergeDistance) {
