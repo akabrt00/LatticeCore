@@ -955,6 +955,7 @@ function addTube(group, start, end, radius, material = latticeMaterial) {
 }
 
 function addSupportStrut(group, start, end, radius) {
+  if (start.distanceTo(end) < getMinimumUsefulSupportLength(radius)) return false;
   addTube(group, start, end, radius, supportMaterial);
   const nodeGeometry = new THREE.SphereGeometry(radius * 1.18, 10, 8);
   const startNode = new THREE.Mesh(nodeGeometry, supportMaterial);
@@ -963,6 +964,11 @@ function addSupportStrut(group, start, end, radius) {
   const endNode = new THREE.Mesh(nodeGeometry.clone(), supportMaterial);
   endNode.position.copy(end);
   group.add(endNode);
+  return true;
+}
+
+function getMinimumUsefulSupportLength(radius) {
+  return Math.max(radius * 5.5, 0.65);
 }
 
 function disposeVolumeGroup() {
@@ -1122,10 +1128,12 @@ function createPrintDiagnosticGroup(analysis) {
   const limit = 140;
   for (const region of selectRegionsAcrossHeight(analysis.regions, limit)) {
     const risk = new THREE.Mesh(riskGeometry, riskMaterial);
-    risk.position.copy(region.target);
+    const anchorTooClose =
+      region.anchor && region.anchor.distanceTo(region.target) < Math.max(analysis.markerRadius * 2.35, 0.75);
+    risk.position.copy(anchorTooClose ? averageVectors([region.target, region.anchor]) : region.target);
     group.add(risk);
 
-    if (region.anchor) {
+    if (region.anchor && !anchorTooClose) {
       const anchor = new THREE.Mesh(anchorGeometry, anchorMaterial);
       anchor.position.copy(region.anchor);
       group.add(anchor);
@@ -1230,10 +1238,11 @@ function analyzeLayerPrintability(sourceGroup, options = {}) {
     ...supportedAnchorPoints,
   ];
   const maxSupportLength = Math.max(maxAxis * 0.32, averageRadius * 20);
+  const minSupportLength = getMinimumUsefulSupportLength(averageRadius);
   const minSupportAngleFromPlate = 90 - maxAngleFromVerticalDeg;
 
   for (const region of regions) {
-    region.anchor = findLayerSupportAnchor(region.target, anchorPool, normal, minSupportAngleFromPlate, maxSupportLength);
+    region.anchor = findLayerSupportAnchor(region.target, anchorPool, normal, minSupportAngleFromPlate, maxSupportLength, minSupportLength);
   }
 
   return {
@@ -1329,7 +1338,7 @@ function groupUnsupportedLayerCells(cells, normal) {
   return regions.sort((a, b) => a.target.dot(normal) - b.target.dot(normal));
 }
 
-function findLayerSupportAnchor(target, candidates, normal, minSupportAngleFromPlateDeg, maxSupportLength) {
+function findLayerSupportAnchor(target, candidates, normal, minSupportAngleFromPlateDeg, maxSupportLength, minSupportLength = 0.001) {
   let best = null;
   let bestScore = Infinity;
   const minRiseRatio = Math.sin(THREE.MathUtils.degToRad(minSupportAngleFromPlateDeg));
@@ -1345,7 +1354,7 @@ function findLayerSupportAnchor(target, candidates, normal, minSupportAngleFromP
     if (drop <= 0.001) continue;
     const direction = new THREE.Vector3().subVectors(target, candidate);
     const length = direction.length();
-    if (length <= 0.001 || length > maxSupportLength) continue;
+    if (length < minSupportLength || length > maxSupportLength) continue;
     const riseRatio = Math.abs(direction.dot(normal)) / length;
     if (riseRatio < minRiseRatio) continue;
 
@@ -1370,6 +1379,7 @@ function createPrintSupportGroup(sourceGroup, analysis = null) {
     unresolved: 0,
     source: "mesh",
     addedStruts: 0,
+    mergedCloseNodes: 0,
   };
   const normalWorld = getBuildNormal(settings).normalize();
   const inverseRotation = new THREE.Quaternion().setFromEuler(getPrintEuler(settings)).invert();
@@ -1405,8 +1415,11 @@ function createPrintSupportGroup(sourceGroup, analysis = null) {
     const key = region.target.clone().divideScalar(nodeCellSize).floor().toArray().join(":");
     if (usedCells.has(key)) continue;
     usedCells.add(key);
-    addSupportStrut(supportGroup, region.anchor, region.target, radius);
-    supportGroup.userData.supportStats.addedStruts += 1;
+    if (addSupportStrut(supportGroup, region.anchor, region.target, radius)) {
+      supportGroup.userData.supportStats.addedStruts += 1;
+    } else {
+      supportGroup.userData.supportStats.mergedCloseNodes += 1;
+    }
   }
 
   sourceGroup.updateMatrixWorld(true);
@@ -1453,8 +1466,11 @@ function createPrintSupportGroup(sourceGroup, analysis = null) {
       }
 
       usedCells.add(key);
-      addSupportStrut(supportGroup, anchor, center, radius);
-      supportGroup.userData.supportStats.addedStruts += 1;
+      if (addSupportStrut(supportGroup, anchor, center, radius)) {
+        supportGroup.userData.supportStats.addedStruts += 1;
+      } else {
+        supportGroup.userData.supportStats.mergedCloseNodes += 1;
+      }
     }
   });
 
@@ -1497,9 +1513,12 @@ function createPrintSupportGroup(sourceGroup, analysis = null) {
     }
 
     usedCells.add(key);
-    addSupportStrut(supportGroup, anchor, candidate.point, radius);
-    supportGroup.userData.supportStats.addedStruts += 1;
-    nodeSupports += 1;
+    if (addSupportStrut(supportGroup, anchor, candidate.point, radius)) {
+      supportGroup.userData.supportStats.addedStruts += 1;
+      nodeSupports += 1;
+    } else {
+      supportGroup.userData.supportStats.mergedCloseNodes += 1;
+    }
   }
 
   return supportGroup;
