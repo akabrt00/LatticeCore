@@ -1048,19 +1048,16 @@ function rebuildPrintSupports() {
   }
 
   const analysis = analyzeLayerPrintability(state.volumeGroup);
-  const diagnosticGroup = createPrintDiagnosticGroup(analysis);
-  if (diagnosticGroup.children.length > 0) {
-    state.printDiagnosticGroup = diagnosticGroup;
-    scene.add(diagnosticGroup);
-  }
 
   if (!printControlsConfig.support.checked) {
+    showPrintDiagnosticGroup(analysis);
     updatePrintAnalysisLabels(analysis, 0);
     return;
   }
 
   const supportGroup = createPrintSupportGroup(state.volumeGroup, analysis);
   if (supportGroup.children.length === 0) {
+    showPrintDiagnosticGroup(analysis);
     updatePrintAnalysisLabels(analysis, 0);
     return;
   }
@@ -1068,7 +1065,17 @@ function rebuildPrintSupports() {
   state.volumeGroup.add(supportGroup);
   state.supportGroup = supportGroup;
   const finalAnalysis = analyzeLayerPrintability(state.volumeGroup, { includeSupports: true });
+  showPrintDiagnosticGroup(finalAnalysis);
   updatePrintAnalysisLabels(finalAnalysis, supportGroup.userData.supportStats?.addedStruts ?? supportGroup.children.length);
+}
+
+function showPrintDiagnosticGroup(analysis) {
+  disposePrintDiagnosticGroup();
+  const diagnosticGroup = createPrintDiagnosticGroup(analysis);
+  if (diagnosticGroup.children.length === 0) return;
+  state.printDiagnosticGroup = diagnosticGroup;
+  scene.add(diagnosticGroup);
+  applyPrintTransforms();
 }
 
 function disposePrintSupportGroup() {
@@ -1378,8 +1385,8 @@ function createPrintSupportGroup(sourceGroup, analysis = null) {
   const candidates = candidateData.candidates.sort((a, b) => b.projection - a.projection);
   supportGroup.userData.supportStats.source = candidateData.source;
   const usedCells = new Set();
-  const maxSupports = 96;
-  const maxNodeSupports = 68;
+  const maxSupports = 160;
+  const maxNodeSupports = 96;
   const minDrop = Math.max(radius * 5, spacing * 0.18);
   const maxLength = Math.max(spacing * 2.9, radius * 22);
   const minPrintableRise = Math.sin(THREE.MathUtils.degToRad(38));
