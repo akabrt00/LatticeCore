@@ -58,3 +58,8 @@ závislá na CDN importech v prohlížeči.
 ```powershell
 npm run build
 ```
+
+## Research notes
+
+Relevant external Voronoi project notes are collected in
+[docs/external-voronoi-project-notes.md](docs/external-voronoi-project-notes.md).
