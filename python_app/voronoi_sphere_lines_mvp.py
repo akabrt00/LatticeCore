@@ -286,6 +286,106 @@ def collapse_short_edge_nodes(
     return current_edges, collapsed_total
 
 
+def collapse_short_edges_across_groups(
+    edge_groups: list[list[tuple[np.ndarray, np.ndarray]]],
+    min_length: float,
+    max_iterations: int = 3,
+    decimals: int = 6,
+) -> tuple[list[list[tuple[np.ndarray, np.ndarray]]], int]:
+    """Merge near-duplicate nodes across inner, connector, and surface edge groups."""
+    if min_length <= 0 or not edge_groups:
+        return edge_groups, 0
+
+    current_groups = edge_groups
+    collapsed_total = 0
+
+    for _ in range(max_iterations):
+        points_by_key: dict[tuple[float, float, float], np.ndarray] = {}
+        parent: dict[tuple[float, float, float], tuple[float, float, float]] = {}
+
+        def key_for(point: np.ndarray) -> tuple[float, float, float]:
+            return tuple(np.round(point, decimals))
+
+        def ensure(point: np.ndarray) -> tuple[float, float, float]:
+            key = key_for(point)
+            points_by_key.setdefault(key, point)
+            parent.setdefault(key, key)
+            return key
+
+        def find(key: tuple[float, float, float]) -> tuple[float, float, float]:
+            root = key
+            while parent[root] != root:
+                root = parent[root]
+            while parent[key] != key:
+                next_key = parent[key]
+                parent[key] = root
+                key = next_key
+            return root
+
+        def union(first: tuple[float, float, float], second: tuple[float, float, float]) -> None:
+            first_root = find(first)
+            second_root = find(second)
+            if first_root != second_root:
+                parent[second_root] = first_root
+
+        short_edges = 0
+        for group in current_groups:
+            for start, end in group:
+                start_key = ensure(start)
+                end_key = ensure(end)
+                if float(np.linalg.norm(end - start)) < min_length:
+                    union(start_key, end_key)
+                    short_edges += 1
+
+        point_keys = list(points_by_key)
+        for first_index, first_key in enumerate(point_keys):
+            first_point = points_by_key[first_key]
+            for second_key in point_keys[first_index + 1 :]:
+                if float(np.linalg.norm(points_by_key[second_key] - first_point)) >= min_length:
+                    continue
+                first_root = find(first_key)
+                second_root = find(second_key)
+                if first_root == second_root:
+                    continue
+                union(first_root, second_root)
+                short_edges += 1
+
+        if short_edges == 0:
+            break
+
+        components: dict[tuple[float, float, float], list[np.ndarray]] = {}
+        for key, point in points_by_key.items():
+            components.setdefault(find(key), []).append(point)
+
+        merged_points = {
+            root: np.median(np.asarray(component_points), axis=0)
+            for root, component_points in components.items()
+        }
+
+        rebuilt_groups: list[list[tuple[np.ndarray, np.ndarray]]] = []
+        for group in current_groups:
+            rebuilt_group: list[tuple[np.ndarray, np.ndarray]] = []
+            seen_edges: set[tuple[tuple[float, float, float], tuple[float, float, float]]] = set()
+            for start, end in group:
+                merged_start = merged_points[find(key_for(start))]
+                merged_end = merged_points[find(key_for(end))]
+                if np.linalg.norm(merged_end - merged_start) < min_length:
+                    continue
+                start_key = key_for(merged_start)
+                end_key = key_for(merged_end)
+                edge_key = (start_key, end_key) if start_key <= end_key else (end_key, start_key)
+                if edge_key in seen_edges:
+                    continue
+                seen_edges.add(edge_key)
+                rebuilt_group.append((merged_start, merged_end))
+            rebuilt_groups.append(rebuilt_group)
+
+        current_groups = rebuilt_groups
+        collapsed_total += short_edges
+
+    return current_groups, collapsed_total
+
+
 def optimize_strut_network(
     shape: str,
     edges: list[tuple[np.ndarray, np.ndarray]],
@@ -1363,7 +1463,6 @@ def main() -> None:
             enabled=not args.no_optimize,
         )
 
-    tube_mesh = create_tube_mesh(inside_edges, args.tube_radius)
     if args.no_shell:
         shell_mesh = pv.PolyData()
         surface_edges: list[tuple[np.ndarray, np.ndarray]] = []
@@ -1399,6 +1498,29 @@ def main() -> None:
             body_mesh,
         )
     )
+    if not args.no_optimize and not args.surface_only:
+        [inside_edges, connector_edges, surface_edges], global_collapsed = collapse_short_edges_across_groups(
+            [inside_edges, connector_edges, surface_edges],
+            min_strut_length,
+        )
+        if global_collapsed:
+            optimization_stats = OptimizationStats(
+                raw_edges=optimization_stats.raw_edges,
+                inside_edges=optimization_stats.inside_edges,
+                removed_short_edges=optimization_stats.removed_short_edges,
+                collapsed_short_edges=optimization_stats.collapsed_short_edges + global_collapsed,
+            )
+            if body_mesh is not None:
+                inside_edges = filter_edges_inside_mesh(inside_edges, body_mesh)
+                connector_edges = [
+                    (start, end)
+                    for start, end in connector_edges
+                    if edge_stays_inside_mesh(start, end, body_mesh) or edge_stays_inside_mesh(end, start, body_mesh)
+                ]
+            else:
+                inside_edges = filter_edges_inside_body(shape, inside_edges, body_radius)
+                connector_edges = filter_edges_inside_body(shape, connector_edges, body_radius)
+
     if body_mesh is not None and not args.surface_only:
         inside_edges, connector_edges, disconnected_removed = keep_edges_connected_to_surface(
             inside_edges,
@@ -1407,7 +1529,6 @@ def main() -> None:
         )
         if disconnected_removed:
             print(f"Removed disconnected imported-mesh struts: {disconnected_removed}")
-        tube_mesh = create_tube_mesh(inside_edges, args.tube_radius)
 
     support_edges = (
         []
@@ -1420,6 +1541,8 @@ def main() -> None:
             args.support_max_length * body_radius,
         )
     )
+    tube_mesh = create_tube_mesh(inside_edges, args.tube_radius)
+    shell_mesh = create_tube_mesh(surface_edges, args.surface_tube_radius).clean() if surface_edges else pv.PolyData()
     connector_mesh = create_tube_mesh(connector_edges + support_edges, args.tube_radius)
     if args.no_nodes:
         node_mesh = pv.PolyData()
