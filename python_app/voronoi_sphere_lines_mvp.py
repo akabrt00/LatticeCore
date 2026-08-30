@@ -1,12 +1,38 @@
 from __future__ import annotations
 
 import argparse
+import json
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 
 import numpy as np
 import pyvista as pv
 from scipy.spatial import SphericalVoronoi, Voronoi
+
+from cache_store import CacheStore, build_cache_keys, canonical_hash, file_content_hash
+from density_solver import density_statistics, mass_estimate
+from debug_payload import ALL_LAYERS, write_debug_payload
+from conformal_surface import (
+    SurfaceVoronoiParameters,
+    SurfaceVoronoiResult,
+    generate_conformal_surface,
+    place_conformal_surface_graph,
+)
+from implicit_meshing import (
+    BoxDomain,
+    CapsulePrimitive,
+    SpherePrimitive,
+    generate_implicit_union_mesh,
+    resolve_voxel_size,
+)
+from imported_mesh import (
+    TriangleMeshDomain,
+    clip_edges_to_domain,
+    generate_points_in_domain,
+    load_triangle_mesh,
+)
+from worker_runtime import WorkerRuntime, build_topology_session_key
 
 
 @dataclass(frozen=True)
@@ -17,6 +43,23 @@ class OptimizationStats:
     inside_edges: int
     removed_short_edges: int
     collapsed_short_edges: int = 0
+
+
+def as_half_sizes(value: float | np.ndarray | list[float] | tuple[float, float, float]) -> np.ndarray:
+    """Normalize a scalar cube half-size or XYZ box half-sizes to a 3-vector."""
+    half_sizes = np.asarray(value, dtype=float)
+    if half_sizes.ndim == 0:
+        return np.repeat(float(half_sizes), 3)
+    if half_sizes.shape != (3,):
+        raise ValueError(f"Box half-sizes must be scalar or XYZ triplet, got shape {half_sizes.shape}.")
+    if np.any(half_sizes <= 0):
+        raise ValueError("Box dimensions must be positive.")
+    return half_sizes
+
+
+def box_reference_radius(half_sizes: np.ndarray) -> float:
+    """Use the largest half-axis as the existing relative-parameter reference length."""
+    return float(np.max(as_half_sizes(half_sizes)))
 
 
 def generate_points_in_sphere(n: int, radius: float, random_seed: int = 42) -> np.ndarray:
@@ -32,20 +75,16 @@ def generate_points_in_sphere(n: int, radius: float, random_seed: int = 42) -> n
     return np.asarray(points)
 
 
-def generate_points_in_box(n: int, half_size: float, random_seed: int = 42) -> np.ndarray:
+def generate_points_in_box(n: int, half_size: float | np.ndarray, random_seed: int = 42) -> np.ndarray:
     """Generate n random points inside a box centered at [0, 0, 0]."""
     rng = np.random.default_rng(random_seed)
-    return rng.uniform(-half_size, half_size, size=(n, 3))
+    half_sizes = as_half_sizes(half_size)
+    return rng.uniform(-half_sizes, half_sizes, size=(n, 3))
 
 
-def load_input_body_mesh(input_stl: str) -> pv.PolyData:
-    """Load an STL body, center it like the web preview, and return a closed surface mesh."""
-    mesh = pv.read(input_stl).extract_surface().triangulate().clean()
-    if mesh.n_points == 0 or mesh.n_cells == 0:
-        raise ValueError(f"Input STL is empty: {input_stl}")
-
-    center = np.asarray(mesh.center, dtype=float)
-    mesh.translate(-center, inplace=True)
+def load_input_body_mesh(input_path: str, import_scale: float = 1.0) -> pv.PolyData:
+    """Load a triangular STL/OBJ without changing its source coordinate system."""
+    mesh, _ = load_triangle_mesh(input_path, import_scale)
     return mesh
 
 
@@ -116,6 +155,31 @@ def compute_voronoi_edges(points: np.ndarray) -> list[tuple[np.ndarray, np.ndarr
     return edges
 
 
+def compute_voronoi_edges_with_ghost_seeds(
+    points: np.ndarray,
+    minimum: np.ndarray,
+    maximum: np.ndarray,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Bound imported-mesh Voronoi cells with deterministic seeds outside its AABB."""
+    center = (np.asarray(minimum, dtype=float) + np.asarray(maximum, dtype=float)) * 0.5
+    half = np.maximum((np.asarray(maximum, dtype=float) - np.asarray(minimum, dtype=float)) * 0.5, 1e-6)
+    ghost = np.asarray(
+        [center + np.asarray([x, y, z], dtype=float) * half * 2.5
+         for x in (-1.0, 0.0, 1.0)
+         for y in (-1.0, 0.0, 1.0)
+         for z in (-1.0, 0.0, 1.0)
+         if (x, y, z) != (0.0, 0.0, 0.0)]
+    )
+    return compute_voronoi_edges(np.vstack((points, ghost)))
+
+
+def compute_voronoi_vertex_count(points: np.ndarray) -> int:
+    """Return the number of finite vertices produced by SciPy's 3D Voronoi diagram."""
+    if len(points) < 5:
+        return 0
+    return int(len(Voronoi(points).vertices))
+
+
 def filter_edges_inside_sphere(
     edges: list[tuple[np.ndarray, np.ndarray]],
     radius: float,
@@ -132,13 +196,14 @@ def filter_edges_inside_sphere(
 
 def filter_edges_inside_box(
     edges: list[tuple[np.ndarray, np.ndarray]],
-    half_size: float,
+    half_size: float | np.ndarray,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
     """Keep only edges whose both endpoints are inside the box."""
+    half_sizes = as_half_sizes(half_size)
     filtered_edges: list[tuple[np.ndarray, np.ndarray]] = []
 
     for start, end in edges:
-        if np.all(np.abs(start) <= half_size) and np.all(np.abs(end) <= half_size):
+        if np.all(np.abs(start) <= half_sizes) and np.all(np.abs(end) <= half_sizes):
             filtered_edges.append((start, end))
 
     return filtered_edges
@@ -712,29 +777,31 @@ def compute_square_voronoi_edges(
     return edges
 
 
-def face_point_to_3d(face: str, point: np.ndarray, half_size: float) -> np.ndarray:
-    """Map a 2D face point to a 3D point on one cube face."""
+def face_point_to_3d(face: str, point: np.ndarray, half_size: float | np.ndarray) -> np.ndarray:
+    """Map a normalized 2D face point to its 3D box face."""
+    hx, hy, hz = as_half_sizes(half_size)
     u, v = point
     if face == "x+":
-        return np.asarray([half_size, u, v])
+        return np.asarray([hx, u * hy, v * hz])
     if face == "x-":
-        return np.asarray([-half_size, u, v])
+        return np.asarray([-hx, u * hy, v * hz])
     if face == "y+":
-        return np.asarray([u, half_size, v])
+        return np.asarray([u * hx, hy, v * hz])
     if face == "y-":
-        return np.asarray([u, -half_size, v])
+        return np.asarray([u * hx, -hy, v * hz])
     if face == "z+":
-        return np.asarray([u, v, half_size])
-    return np.asarray([u, v, -half_size])
+        return np.asarray([u * hx, v * hy, hz])
+    return np.asarray([u * hx, v * hy, -hz])
 
 
-def create_box_frame_edges(half_size: float) -> list[tuple[np.ndarray, np.ndarray]]:
-    """Create the 12 outer cube frame edges."""
+def create_box_frame_edges(half_size: float | np.ndarray) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Create the 12 outer box frame edges."""
+    hx, hy, hz = as_half_sizes(half_size)
     corners = [
         np.asarray([x, y, z])
-        for x in (-half_size, half_size)
-        for y in (-half_size, half_size)
-        for z in (-half_size, half_size)
+        for x in (-hx, hx)
+        for y in (-hy, hy)
+        for z in (-hz, hz)
     ]
     edges = []
 
@@ -748,7 +815,7 @@ def create_box_frame_edges(half_size: float) -> list[tuple[np.ndarray, np.ndarra
 
 
 def create_box_surface_voronoi_edges(
-    half_size: float,
+    half_size: float | np.ndarray,
     surface_seed_count: int,
     random_seed: int,
     min_edge_length: float,
@@ -759,8 +826,8 @@ def create_box_surface_voronoi_edges(
     surface_edges: list[tuple[np.ndarray, np.ndarray]] = create_box_frame_edges(half_size)
 
     for face_index, face in enumerate(faces):
-        points_2d = generate_points_on_square(seeds_per_face, half_size, random_seed + face_index * 101)
-        edges_2d = compute_square_voronoi_edges(points_2d, half_size, min_edge_length)
+        points_2d = generate_points_on_square(seeds_per_face, 1.0, random_seed + face_index * 101)
+        edges_2d = compute_square_voronoi_edges(points_2d, 1.0, 0.0)
         for start, end in edges_2d:
             surface_edges.append(
                 (
@@ -773,7 +840,7 @@ def create_box_surface_voronoi_edges(
 
 
 def create_box_surface_voronoi_shell(
-    half_size: float,
+    half_size: float | np.ndarray,
     surface_seed_count: int,
     tube_radius: float,
     random_seed: int,
@@ -964,22 +1031,26 @@ def unique_edge_points(edges: list[tuple[np.ndarray, np.ndarray]], decimals: int
     return list(points.values())
 
 
-def box_boundary_distance(point: np.ndarray, half_size: float) -> float:
+def box_boundary_distance(point: np.ndarray, half_size: float | np.ndarray) -> float:
     """Return distance from a point inside a box to the nearest face."""
-    return float(half_size - np.max(np.abs(point)))
+    half_sizes = as_half_sizes(half_size)
+    return float(np.min(half_sizes - np.abs(point)))
 
 
-def nearest_box_face(point: np.ndarray) -> tuple[int, float]:
-    """Return dominant axis and sign for the nearest box face."""
-    axis = int(np.argmax(np.abs(point)))
+def nearest_box_face(point: np.ndarray, half_size: float | np.ndarray) -> tuple[int, float]:
+    """Return nearest axis-aligned box face and sign."""
+    half_sizes = as_half_sizes(half_size)
+    margins = half_sizes - np.abs(point)
+    axis = int(np.argmin(margins))
     sign = 1.0 if point[axis] >= 0 else -1.0
     return axis, sign
 
 
-def same_box_face(point: np.ndarray, surface_point: np.ndarray, half_size: float) -> bool:
+def same_box_face(point: np.ndarray, surface_point: np.ndarray, half_size: float | np.ndarray) -> bool:
     """Return True when an inner point and surface point belong to the same nearest face."""
-    axis, sign = nearest_box_face(point)
-    return bool(abs(surface_point[axis] - sign * half_size) <= 1e-6)
+    half_sizes = as_half_sizes(half_size)
+    axis, sign = nearest_box_face(point, half_sizes)
+    return bool(abs(surface_point[axis] - sign * half_sizes[axis]) <= 1e-6)
 
 
 def point_key_3d(point: np.ndarray, decimals: int = 5) -> tuple[float, float, float]:
@@ -997,7 +1068,7 @@ def edge_key_3d(start: np.ndarray, end: np.ndarray, decimals: int = 5) -> tuple[
 def create_box_connection_edges(
     inside_edges: list[tuple[np.ndarray, np.ndarray]],
     surface_edges: list[tuple[np.ndarray, np.ndarray]],
-    half_size: float,
+    half_size: float | np.ndarray,
     boundary_band: float,
     max_length: float,
     min_length: float,
@@ -1263,6 +1334,361 @@ def combine_meshes(meshes: list[pv.PolyData]) -> pv.PolyData:
     return combined.clean()
 
 
+def is_point_inside_domain(point: np.ndarray, shape: str, domain: float | np.ndarray, tolerance: float = 0.0) -> bool:
+    """Return whether a point lies in the supported generation domain."""
+    if shape == "box":
+        return bool(np.all(np.abs(point) <= as_half_sizes(domain) + tolerance))
+    if shape == "sphere":
+        return bool(np.linalg.norm(point) <= float(domain) + tolerance)
+    raise ValueError(f"Point-domain query is not implemented for shape: {shape}")
+
+
+def signed_distance_to_domain(point: np.ndarray, shape: str, domain: float | np.ndarray) -> float:
+    """Return a positive distance inside the domain and negative outside."""
+    if shape == "box":
+        return float(np.min(as_half_sizes(domain) - np.abs(point)))
+    if shape == "sphere":
+        return float(domain) - float(np.linalg.norm(point))
+    raise ValueError(f"Signed distance is not implemented for shape: {shape}")
+
+
+def inset_edges_for_box(
+    edges: list[tuple[np.ndarray, np.ndarray]],
+    half_sizes: float | np.ndarray,
+    geometry_radius: float,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Clamp centerlines into a box inset so their swept volume stays in the box.
+
+    This is the current robust polygonal-box approximation. It preserves closed
+    tube and node primitives and can later be replaced by a true mesh-domain
+    intersection behind ``clip_final_geometry_to_domain``.
+    """
+    inset = as_half_sizes(half_sizes) - float(geometry_radius)
+    if np.any(inset <= 0):
+        raise ValueError("Strut/node radius is too large for the requested box dimensions.")
+
+    clipped: list[tuple[np.ndarray, np.ndarray]] = []
+    seen: set[tuple[tuple[float, float, float], tuple[float, float, float]]] = set()
+    for start, end in edges:
+        adjusted_start = np.clip(np.asarray(start, dtype=float), -inset, inset)
+        adjusted_end = np.clip(np.asarray(end, dtype=float), -inset, inset)
+        if np.linalg.norm(adjusted_end - adjusted_start) <= 1e-8:
+            continue
+        key = edge_key_3d(adjusted_start, adjusted_end, decimals=6)
+        if key in seen:
+            continue
+        seen.add(key)
+        clipped.append((adjusted_start, adjusted_end))
+    return clipped
+
+
+def clip_final_geometry_to_domain(
+    edges: list[tuple[np.ndarray, np.ndarray]],
+    shape: str,
+    domain: float | np.ndarray,
+    geometry_radius: float,
+    boundary_mode: str,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Prepare centerlines so the generated swept geometry respects its domain."""
+    if boundary_mode == "centerline":
+        return edges
+    if boundary_mode != "exact":
+        raise ValueError(f"Unknown boundary mode: {boundary_mode}")
+    if shape != "box":
+        # Exact general-mesh clipping intentionally remains behind this API.
+        return edges
+    return inset_edges_for_box(edges, domain, geometry_radius)
+
+
+def analyze_strut_graph(
+    edges: list[tuple[np.ndarray, np.ndarray]],
+    extra_nodes: list[np.ndarray] | None = None,
+    decimals: int = 6,
+) -> dict:
+    """Compute deterministic graph connectivity and degree statistics."""
+    graph: dict[tuple[float, float, float], set[tuple[float, float, float]]] = {}
+    for point in extra_nodes or []:
+        graph.setdefault(point_key_3d(point, decimals), set())
+    for start, end in edges:
+        first = point_key_3d(start, decimals)
+        second = point_key_3d(end, decimals)
+        graph.setdefault(first, set()).add(second)
+        graph.setdefault(second, set()).add(first)
+
+    components: list[set[tuple[float, float, float]]] = []
+    visited: set[tuple[float, float, float]] = set()
+    for node in sorted(graph):
+        if node in visited:
+            continue
+        component: set[tuple[float, float, float]] = set()
+        stack = [node]
+        while stack:
+            current = stack.pop()
+            if current in component:
+                continue
+            component.add(current)
+            stack.extend(graph[current] - component)
+        visited.update(component)
+        components.append(component)
+
+    degrees = [len(neighbors) for neighbors in graph.values()]
+    return {
+        "connectedComponentCount": len(components),
+        "componentSizes": sorted((len(component) for component in components), reverse=True),
+        "isolatedNodeCount": sum(degree == 0 for degree in degrees),
+        "degreeOneNodeCount": sum(degree == 1 for degree in degrees),
+        "averageNodeDegree": float(np.mean(degrees)) if degrees else 0.0,
+        "maximumNodeDegree": max(degrees, default=0),
+        "nodeCount": len(graph),
+    }
+
+
+def keep_largest_graph_component(
+    edge_groups: list[list[tuple[np.ndarray, np.ndarray]]],
+    decimals: int = 6,
+) -> tuple[list[list[tuple[np.ndarray, np.ndarray]]], int, int]:
+    """Keep only the largest connected strut component, preserving edge groups."""
+    all_edges = [edge for group in edge_groups for edge in group]
+    if not all_edges:
+        return edge_groups, 0, 0
+
+    adjacency: dict[tuple[float, float, float], set[tuple[float, float, float]]] = {}
+    for start, end in all_edges:
+        first = point_key_3d(start, decimals)
+        second = point_key_3d(end, decimals)
+        adjacency.setdefault(first, set()).add(second)
+        adjacency.setdefault(second, set()).add(first)
+
+    components: list[set[tuple[float, float, float]]] = []
+    remaining = set(adjacency)
+    while remaining:
+        component: set[tuple[float, float, float]] = set()
+        stack = [min(remaining)]
+        while stack:
+            node = stack.pop()
+            if node in component:
+                continue
+            component.add(node)
+            stack.extend(adjacency[node] - component)
+        remaining -= component
+        components.append(component)
+
+    largest = max(components, key=lambda component: (len(component), sorted(component)[0]))
+    filtered_groups = [
+        [
+            (start, end)
+            for start, end in group
+            if point_key_3d(start, decimals) in largest and point_key_3d(end, decimals) in largest
+        ]
+        for group in edge_groups
+    ]
+    removed_edges = len(all_edges) - sum(len(group) for group in filtered_groups)
+    return filtered_groups, max(0, len(components) - 1), removed_edges
+
+
+def _mesh_faces(mesh: pv.PolyData) -> np.ndarray:
+    """Return triangular face indices as an N x 3 array."""
+    triangular = mesh.triangulate()
+    if triangular.n_cells == 0:
+        return np.empty((0, 3), dtype=np.int64)
+    return np.asarray(triangular.faces, dtype=np.int64).reshape(-1, 4)[:, 1:4]
+
+
+def validate_mesh(mesh: pv.PolyData, tolerance: float = 1e-7) -> dict:
+    """Calculate topology and triangle-quality metrics from actual export geometry."""
+    triangular = mesh.extract_surface(algorithm="dataset_surface").triangulate()
+    points = np.asarray(triangular.points, dtype=float)
+    faces = _mesh_faces(triangular)
+    if len(points) == 0 or len(faces) == 0:
+        return {
+            "isWatertight": False, "isEdgeManifold": False, "boundaryEdgeCount": 0,
+            "nonManifoldEdgeCount": 0, "degenerateTriangleCount": 0,
+            "duplicateTriangleCount": 0, "unusedVertexCount": len(points),
+            "connectedComponentCount": 0, "signedVolumeMm3": 0.0, "absoluteVolumeMm3": 0.0,
+        }
+
+    quantized = np.round(points / tolerance).astype(np.int64)
+    _, canonical = np.unique(quantized, axis=0, return_inverse=True)
+    canonical_faces = canonical[faces]
+    a = points[faces[:, 0]]
+    b = points[faces[:, 1]]
+    c = points[faces[:, 2]]
+    twice_areas = np.linalg.norm(np.cross(b - a, c - a), axis=1)
+    degenerate = (twice_areas <= tolerance * tolerance) | (
+        (canonical_faces[:, 0] == canonical_faces[:, 1])
+        | (canonical_faces[:, 1] == canonical_faces[:, 2])
+        | (canonical_faces[:, 2] == canonical_faces[:, 0])
+    )
+
+    sorted_faces = np.sort(canonical_faces, axis=1)
+    _, face_counts = np.unique(sorted_faces, axis=0, return_counts=True)
+    duplicate_count = int(np.sum(np.maximum(face_counts - 1, 0)))
+
+    edge_counts: dict[tuple[int, int], int] = {}
+    for face in canonical_faces[~degenerate]:
+        for first, second in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
+            key = (int(first), int(second)) if first < second else (int(second), int(first))
+            edge_counts[key] = edge_counts.get(key, 0) + 1
+    boundary_count = sum(count == 1 for count in edge_counts.values())
+    non_manifold_count = sum(count > 2 for count in edge_counts.values())
+
+    face_graph = [[] for _ in range(len(faces))]
+    edge_faces: dict[tuple[int, int], list[int]] = {}
+    for face_index, face in enumerate(canonical_faces):
+        for first, second in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
+            key = (int(first), int(second)) if first < second else (int(second), int(first))
+            edge_faces.setdefault(key, []).append(face_index)
+    for indices in edge_faces.values():
+        for face_index in indices[1:]:
+            face_graph[indices[0]].append(face_index)
+            face_graph[face_index].append(indices[0])
+    visited_faces: set[int] = set()
+    component_count = 0
+    component_volumes: list[float] = []
+    for face_index in range(len(faces)):
+        if face_index in visited_faces:
+            continue
+        component_count += 1
+        stack = [face_index]
+        component_faces: list[int] = []
+        while stack:
+            current = stack.pop()
+            if current in visited_faces:
+                continue
+            visited_faces.add(current)
+            component_faces.append(current)
+            stack.extend(face_graph[current])
+        indices = np.asarray(component_faces, dtype=np.int64)
+        component_volumes.append(abs(float(np.sum(np.einsum("ij,ij->i", a[indices], np.cross(b[indices], c[indices]))) / 6.0)))
+
+    used = np.unique(faces)
+    signed_volume = float(np.sum(np.einsum("ij,ij->i", a, np.cross(b, c))) / 6.0)
+    return {
+        "isWatertight": boundary_count == 0 and non_manifold_count == 0,
+        "isEdgeManifold": non_manifold_count == 0,
+        "boundaryEdgeCount": int(boundary_count),
+        "nonManifoldEdgeCount": int(non_manifold_count),
+        "degenerateTriangleCount": int(np.count_nonzero(degenerate)),
+        "duplicateTriangleCount": duplicate_count,
+        "unusedVertexCount": int(len(points) - len(used)),
+        "connectedComponentCount": int(component_count),
+        "componentVolumesMm3": component_volumes,
+        "signedVolumeMm3": signed_volume,
+        "absoluteVolumeMm3": float(np.sum(component_volumes)),
+    }
+
+
+def repair_mesh_for_export(mesh: pv.PolyData, tolerance: float = 1e-7) -> pv.PolyData:
+    """Apply conservative vertex/face cleanup without changing topology intentionally."""
+    cleaned = mesh.extract_surface(algorithm="dataset_surface").triangulate().clean(
+        point_merging=True,
+        tolerance=tolerance,
+        absolute=True,
+    )
+    points = np.asarray(cleaned.points, dtype=float)
+    faces = _mesh_faces(cleaned)
+    if len(faces) == 0:
+        return pv.PolyData()
+
+    a = points[faces[:, 0]]
+    b = points[faces[:, 1]]
+    c = points[faces[:, 2]]
+    valid = np.linalg.norm(np.cross(b - a, c - a), axis=1) > tolerance * tolerance
+    faces = faces[valid]
+    canonical = np.sort(faces, axis=1)
+    _, unique_indices = np.unique(canonical, axis=0, return_index=True)
+    faces = faces[np.sort(unique_indices)]
+    face_data = np.hstack((np.full((len(faces), 1), 3, dtype=np.int64), faces)).ravel()
+    repaired = pv.PolyData(points, face_data).clean(point_merging=True, tolerance=tolerance, absolute=True)
+    validation = validate_mesh(repaired, tolerance)
+    if validation["isWatertight"] and validation["signedVolumeMm3"] < 0:
+        repaired.flip_faces(inplace=True)
+    return repaired
+
+
+def mesh_bounds_statistics(mesh: pv.PolyData, requested_sizes: np.ndarray | None = None) -> dict:
+    """Return actual bounds and maximum excess beyond requested box dimensions."""
+    bounds = np.asarray(mesh.bounds, dtype=float)
+    actual = np.asarray([bounds[1] - bounds[0], bounds[3] - bounds[2], bounds[5] - bounds[4]])
+    stats = {
+        "boundsMinX": float(bounds[0]), "boundsMaxX": float(bounds[1]),
+        "boundsMinY": float(bounds[2]), "boundsMaxY": float(bounds[3]),
+        "boundsMinZ": float(bounds[4]), "boundsMaxZ": float(bounds[5]),
+        "actualSizeX": float(actual[0]), "actualSizeY": float(actual[1]), "actualSizeZ": float(actual[2]),
+    }
+    if requested_sizes is None:
+        stats.update({"requestedSizeX": None, "requestedSizeY": None, "requestedSizeZ": None, "maximumBoundaryOvershootMm": 0.0})
+        return stats
+    requested = np.asarray(requested_sizes, dtype=float)
+    half = requested * 0.5
+    overshoots = [
+        max(0.0, -half[0] - bounds[0]), max(0.0, bounds[1] - half[0]),
+        max(0.0, -half[1] - bounds[2]), max(0.0, bounds[3] - half[1]),
+        max(0.0, -half[2] - bounds[4]), max(0.0, bounds[5] - half[2]),
+    ]
+    stats.update({
+        "requestedSizeX": float(requested[0]), "requestedSizeY": float(requested[1]), "requestedSizeZ": float(requested[2]),
+        "maximumBoundaryOvershootMm": float(max(overshoots)),
+    })
+    return stats
+
+
+def build_generation_metadata(
+    args: argparse.Namespace,
+    points: np.ndarray,
+    voronoi_vertex_count: int,
+    all_edges_before_filtering: int,
+    final_edges: list[tuple[np.ndarray, np.ndarray]],
+    optimization_stats: OptimizationStats,
+    graph_stats: dict,
+    export_mesh: pv.PolyData,
+    validation_before: dict,
+    validation_after: dict,
+    requested_sizes: np.ndarray | None,
+    removed_component_count: int,
+    removed_component_strut_count: int,
+) -> dict:
+    """Build reproducible JSON metadata for the generated export."""
+    lengths = np.asarray([np.linalg.norm(end - start) for start, end in final_edges], dtype=float)
+    statistics = {
+        "seedCount": int(len(points)),
+        "voronoiVertexCount": int(voronoi_vertex_count),
+        "strutCountBeforeFiltering": int(all_edges_before_filtering),
+        "strutCountAfterFiltering": int(len(final_edges)),
+        "removedShortStrutCount": int(optimization_stats.removed_short_edges),
+        "nodeCount": int(graph_stats["nodeCount"]),
+        "minimumStrutLengthMm": float(np.min(lengths)) if len(lengths) else 0.0,
+        "maximumStrutLengthMm": float(np.max(lengths)) if len(lengths) else 0.0,
+        "averageStrutLengthMm": float(np.mean(lengths)) if len(lengths) else 0.0,
+        "medianStrutLengthMm": float(np.median(lengths)) if len(lengths) else 0.0,
+        "totalStrutLengthMm": float(np.sum(lengths)),
+        **graph_stats,
+        "removedComponentCount": int(removed_component_count),
+        "removedComponentStrutCount": int(removed_component_strut_count),
+        "meshVertexCount": int(export_mesh.n_points),
+        "meshTriangleCount": int(export_mesh.n_cells),
+        **mesh_bounds_statistics(export_mesh, requested_sizes),
+    }
+    dimensions = None if requested_sizes is None else {
+        "x": float(requested_sizes[0]), "y": float(requested_sizes[1]), "z": float(requested_sizes[2])
+    }
+    return {
+        "generatorVersion": "0.2.0",
+        "units": "mm",
+        "sourceType": "parametric-box" if requested_sizes is not None else ("imported-stl" if args.input_stl else args.shape),
+        "dimensionsMm": dimensions,
+        "seedCount": int(args.points),
+        "randomSeed": int(args.random_seed),
+        "strutDiameterMm": float(args.tube_radius * 2.0),
+        "minimumStrutLengthMm": float(args.min_strut_length_mm),
+        "boundaryMode": args.boundary_mode,
+        "removeDisconnectedComponents": bool(args.remove_disconnected_components),
+        "statistics": statistics,
+        "meshValidationBeforeRepair": validation_before,
+        "meshValidation": validation_after,
+    }
+
+
 def export_stl(mesh: pv.PolyData, output_path: str | Path) -> None:
     """Export the generated mesh as STL."""
     if mesh.n_points == 0:
@@ -1352,12 +1778,59 @@ def show_scene(
     plotter.show()
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Voronoi tube MVP")
     parser.add_argument("--shape", choices=["sphere", "box"], default="box", help="Implicit body shape.")
-    parser.add_argument("--input-stl", default="", help="Optional STL body used for clipping and surface lattice.")
+    parser.add_argument("--input-stl", default="", help="Deprecated alias for --input-mesh.")
+    parser.add_argument("--input-mesh", default="", help="Optional closed STL or OBJ volume domain.")
+    parser.add_argument("--source-original-name", default="", help="Original upload name stored in metadata only.")
+    parser.add_argument("--import-scale", type=float, default=1.0, help="Explicit STL/OBJ scale applied before all calculations.")
+    parser.add_argument(
+        "--component-mode",
+        choices=["require-single", "keep-largest", "use-all-closed"],
+        default="require-single",
+        help="How multiple closed input components are handled.",
+    )
+    parser.add_argument(
+        "--final-component-mode",
+        choices=["keep-all", "keep-largest"],
+        default="keep-all",
+        help="Keep every output component or only the largest polygonal component.",
+    )
+    parser.add_argument("--boundary-offset-mm", type=float, default=0.0, help="Minimum seed distance from the imported surface.")
+    parser.add_argument("--target-cell-size-mm", type=float, default=0.0, help="Estimate imported-mesh seed count from enclosed volume.")
+    parser.add_argument("--maximum-sampling-attempts", type=int, default=1_000_000)
+    parser.add_argument(
+        "--boundary-structure-mode",
+        choices=["open-volume", "conformal-surface"],
+        default="open-volume",
+    )
+    parser.add_argument("--surface-sampling-mode", choices=["automatic", "custom"], default="automatic")
+    parser.add_argument("--surface-sampling-step-mm", type=float, default=0.0)
+    parser.add_argument("--surface-strut-diameter-mm", type=float, default=0.0)
+    parser.add_argument("--surface-node-radius-mode", choices=["automatic", "custom"], default="automatic")
+    parser.add_argument("--surface-node-radius-mm", type=float, default=0.0)
+    parser.add_argument(
+        "--surface-placement-mode",
+        choices=["inset-inside", "on-surface-clipped"],
+        default="inset-inside",
+    )
+    parser.add_argument("--surface-inset-mode", choices=["automatic", "custom"], default="automatic")
+    parser.add_argument("--surface-inset-mm", type=float, default=0.0)
+    parser.add_argument("--surface-smoothing-iterations", type=int, default=2)
+    parser.add_argument("--surface-smoothing-strength", type=float, default=0.35)
+    parser.add_argument("--connect-surface-to-interior", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--surface-connector-spacing-mm", type=float, default=5.0)
+    parser.add_argument("--surface-connector-maximum-length-mm", type=float, default=15.0)
+    parser.add_argument("--surface-connector-diameter-mm", type=float, default=0.0)
+    parser.add_argument("--minimum-connectors-per-surface-component", type=int, default=1)
+    parser.add_argument("--maximum-surface-working-triangles", type=int, default=300_000)
+    parser.add_argument("--surface-topology-weld-reference-mm", type=float, default=0.0)
     parser.add_argument("--points", type=int, default=80, help="Number of random seed points inside the body.")
     parser.add_argument("--radius", type=float, default=1.0, help="Sphere radius or box half-size.")
+    parser.add_argument("--box-size-x", type=float, default=0.0, help="Optional box X size in mm for parametric Voronoi boxes.")
+    parser.add_argument("--box-size-y", type=float, default=0.0, help="Optional box Y size in mm for parametric Voronoi boxes.")
+    parser.add_argument("--box-size-z", type=float, default=0.0, help="Optional box Z size in mm for parametric Voronoi boxes.")
     parser.add_argument("--tube-radius", type=float, default=0.025, help="Radius of generated tube struts.")
     parser.add_argument(
         "--surface-points",
@@ -1371,6 +1844,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.06,
         help="Minimum inner/surface strut length, relative to radius.",
+    )
+    parser.add_argument(
+        "--min-strut-length-mm",
+        type=float,
+        default=0.0,
+        help="Absolute minimum inner/surface strut length in mm. Overrides --min-strut-length when > 0.",
     )
     parser.add_argument("--no-optimize", action="store_true", help="Keep tiny struts instead of running automatic cleanup.")
     parser.add_argument(
@@ -1406,6 +1885,41 @@ def parse_args() -> argparse.Namespace:
         help="Maximum connector strut length, relative to radius.",
     )
     parser.add_argument("--random-seed", type=int, default=42, help="Random seed for repeatable results.")
+    parser.add_argument(
+        "--boundary-mode",
+        choices=["centerline", "exact"],
+        default="exact",
+        help="Keep only centerlines inside the box or keep the complete swept geometry inside it.",
+    )
+    parser.add_argument(
+        "--mesh-engine",
+        choices=["legacy-primitives", "implicit-union"],
+        default="legacy-primitives",
+        help="Polygonal preview primitives or a unified signed-distance-field mesh.",
+    )
+    parser.add_argument(
+        "--quality-preset",
+        choices=["preview", "standard", "high", "custom"],
+        default="standard",
+        help="Voxel resolution preset for implicit union meshing.",
+    )
+    parser.add_argument(
+        "--voxel-size-mm",
+        type=float,
+        default=0.0,
+        help="Custom voxel size in millimeters when --quality-preset=custom.",
+    )
+    parser.add_argument(
+        "--boundary-tolerance",
+        type=float,
+        default=0.02,
+        help="Allowed numerical box-boundary tolerance in mm.",
+    )
+    parser.add_argument(
+        "--remove-disconnected-components",
+        action="store_true",
+        help="Keep only the largest connected component of the strut graph.",
+    )
     parser.add_argument("--debug", action="store_true", help="Show original seed points and Voronoi lines.")
     parser.add_argument("--no-shell", action="store_true", help="Export and show only inner Voronoi tubes without surface casing.")
     parser.add_argument("--surface-only", action="store_true", help="Export only the surface lattice shell.")
@@ -1415,69 +1929,393 @@ def parse_args() -> argparse.Namespace:
         default="exports/voronoi_lattice_with_surface.stl",
         help="Output STL path. Use an empty string to skip export.",
     )
-    return parser.parse_args()
+    parser.add_argument("--metadata-json", default="", help="Optional path for reproducibility and validation metadata.")
+    parser.add_argument("--debug-mode", choices=["none", "requested", "all"], default="none")
+    parser.add_argument("--debug-layers", default="", help="Comma-separated debug layer names.")
+    parser.add_argument("--debug-maximum-points", type=int, default=100_000)
+    parser.add_argument("--debug-maximum-segments", type=int, default=200_000)
+    parser.add_argument("--debug-manifest-json", default="")
+    parser.add_argument("--debug-buffer-bin", default="")
+    parser.add_argument("--cache-enabled", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--cache-directory", default="cache")
+    parser.add_argument("--cache-maximum-size-gib", type=float, default=5.0)
+    parser.add_argument("--cache-maximum-age-days", type=float, default=30.0)
+    parser.add_argument("--material-density-g-per-cm3", type=float, default=0.0)
+    return parser.parse_args(argv)
 
 
-def main() -> None:
-    args = parse_args()
+def main(
+    argv: list[str] | None = None,
+    runtime_context: WorkerRuntime | None = None,
+) -> dict:
+    overall_started = perf_counter()
+    args = parse_args(argv)
+    cancellation_token = runtime_context.cancellation_token if runtime_context is not None else None
 
-    body_mesh = load_input_body_mesh(args.input_stl) if args.input_stl else None
+    def checkpoint() -> None:
+        if cancellation_token is not None:
+            cancellation_token.check()
+
+    def report(phase: str, message: str, fraction: float | None = None, **metrics) -> None:
+        if runtime_context is not None:
+            runtime_context.report(phase, message, fraction, **metrics)
+
+    report("job-start", "Spouštím generování geometrie.", 0.0)
+    cache = CacheStore(
+        args.cache_directory,
+        enabled=args.cache_enabled,
+        maximum_size_gib=max(args.cache_maximum_size_gib, 0.01),
+        maximum_age_days=max(args.cache_maximum_age_days, 0.01),
+    )
+    cache_events: dict[str, dict] = {}
+
+    def cache_get(level: str, key: str, expected: dict | None = None):
+        checkpoint()
+        started = perf_counter()
+        value = runtime_context.memory_get(level, key) if runtime_context is not None else None
+        memory_hit = value is not None
+        if value is None:
+            report("loading-disk-cache", f"Načítám diskovou cache: {level}.")
+            value = cache.get(level, key, expected)
+            if value is not None and runtime_context is not None:
+                runtime_context.memory_put(level, key, value)
+        cache_events[level] = {
+            "hit": value is not None,
+            "memoryHit": memory_hit,
+            "keyPrefix": key[:12],
+            "loadTimeSeconds": float(perf_counter() - started),
+        }
+        return value
+
+    def cache_put(level: str, key: str, arrays: dict):
+        checkpoint()
+        started = perf_counter()
+        cache.put(level, key, arrays)
+        if runtime_context is not None:
+            runtime_context.memory_put(level, key, arrays)
+        event = cache_events.setdefault(level, {"hit": False, "keyPrefix": key[:12], "loadTimeSeconds": 0.0})
+        event["writeTimeSeconds"] = float(perf_counter() - started)
+
+    input_mesh_path = args.input_mesh or args.input_stl
+    report("reading-input", "Čtu a ověřuji vstupní model.", 0.02)
+    source_hash = (
+        file_content_hash(input_mesh_path)
+        if input_mesh_path
+        else canonical_hash({"shape": args.shape, "radius": args.radius, "box": [args.box_size_x, args.box_size_y, args.box_size_z]})
+    )
+    if runtime_context is not None:
+        runtime_context.activate(
+            build_topology_session_key(source_hash, args),
+            "imported-mesh" if input_mesh_path else f"parametric-{args.shape}",
+        )
+        report(
+            "loading-memory-session",
+            "RAM topologická session nalezena." if runtime_context.session_hit else "Zakládám RAM topologickou session.",
+            0.03,
+            memoryCacheHit=runtime_context.session_hit,
+        )
+    input_validation: dict | None = None
+    seed_sampling: dict | None = None
+    domain_clipping: dict | None = None
+    triangle_domain: TriangleMeshDomain | None = None
+    body_mesh = None
+    if input_mesh_path:
+        report("building-domain", "Připravuji TriangleMeshDomain a prostorový locator.", 0.05)
+        domain_started = perf_counter()
+
+        def build_triangle_domain():
+            loaded_mesh, loaded_validation = load_triangle_mesh(input_mesh_path, args.import_scale)
+            return TriangleMeshDomain(loaded_mesh, args.component_mode, loaded_validation), loaded_validation
+
+        if runtime_context is not None:
+            domain_pair, domain_reused = runtime_context.get_or_create("triangle-domain", build_triangle_domain)
+            runtime_context.domain_reused = domain_reused
+            runtime_context.locator_reused = domain_reused
+            triangle_domain, loaded_validation = domain_pair
+        else:
+            triangle_domain, loaded_validation = build_triangle_domain()
+        body_mesh = triangle_domain.mesh
+        input_validation = {**loaded_validation, **triangle_domain.validate()}
+        input_validation["domainBuildAndValidationTimeSeconds"] = float(perf_counter() - domain_started)
+        if args.target_cell_size_mm > 0:
+            estimated_count = int(round(input_validation["absoluteVolumeMm3"] / args.target_cell_size_mm**3))
+            args.points = int(np.clip(estimated_count, 5, 5000))
+    cache_parameters = {
+        "format": Path(input_mesh_path).suffix.lower() if input_mesh_path else args.shape,
+        "importScale": args.import_scale,
+        "componentMode": args.component_mode,
+        "seedCount": args.points,
+        "targetCellSizeMm": args.target_cell_size_mm,
+        "randomSeed": args.random_seed,
+        "boundaryOffsetMm": args.boundary_offset_mm,
+        "minimumPreliminaryStrutLength": args.min_strut_length_mm * 0.15,
+        "minimumStrutLengthMm": args.min_strut_length_mm,
+        "surfaceSamplingStepMm": args.surface_sampling_step_mm if args.surface_sampling_mode == "custom" else "automatic",
+        "surfaceSmoothingIterations": args.surface_smoothing_iterations,
+        "surfaceSmoothingStrength": args.surface_smoothing_strength,
+        "surfacePlacementMode": args.surface_placement_mode,
+        "surfaceInsetMode": args.surface_inset_mode,
+        "surfaceInsetMm": args.surface_inset_mm,
+        "surfaceStrutDiameterMm": args.surface_strut_diameter_mm,
+        "surfaceTopologyWeldReferenceMm": args.surface_topology_weld_reference_mm,
+        "connectorSpacingMm": args.surface_connector_spacing_mm,
+        "connectorMaximumLengthMm": args.surface_connector_maximum_length_mm,
+        "connectorDiameterMm": args.surface_connector_diameter_mm,
+        "strutDiameterMm": args.tube_radius * 2.0,
+        "nodeRadiusScale": args.node_radius_scale,
+        "voxelSizeMm": args.voxel_size_mm if args.quality_preset == "custom" else args.quality_preset,
+        "finalComponentMode": args.final_component_mode,
+    }
+    cache_keys = build_cache_keys(
+        source_hash,
+        cache_parameters,
+        conformal=args.boundary_structure_mode == "conformal-surface",
+    )
     shape = "mesh" if body_mesh is not None else args.shape
+    body_domain: float | np.ndarray
     if body_mesh is not None:
         bounds = np.asarray(body_mesh.bounds, dtype=float)
         extents = np.asarray([bounds[1] - bounds[0], bounds[3] - bounds[2], bounds[5] - bounds[4]])
         body_radius = float(np.max(extents) * 0.5) or args.radius
-        points = (
-            np.empty((0, 3))
-            if args.surface_only
-            else generate_points_in_mesh(body_mesh, args.points, args.random_seed)
-        )
+        body_domain = body_radius
+        if args.surface_only:
+            points = np.empty((0, 3))
+        else:
+            cached_seeds = cache_get("seeds", cache_keys["seeds"], {"points": (None, 3)})
+            if cached_seeds is not None:
+                points = cached_seeds["points"]
+                seed_sampling = {
+                    "cacheHit": True,
+                    "acceptedSeedCount": int(len(points)),
+                    "requestedSeedCount": int(args.points),
+                }
+            else:
+                report("generating-seeds", "Generuji seed body uvnitř domény.", 0.10)
+                sampled = generate_points_in_domain(
+                    triangle_domain,
+                    args.points,
+                    args.random_seed,
+                    args.boundary_offset_mm,
+                    args.maximum_sampling_attempts,
+                    cancellation_token=cancellation_token,
+                )
+                points = sampled.points
+                seed_sampling = sampled.metadata
+                cache_put("seeds", cache_keys["seeds"], {"points": points})
     else:
-        body_radius = args.radius
-        points = (
-            np.empty((0, 3))
-            if args.surface_only
-            else generate_body_points(shape, args.points, body_radius, args.random_seed)
-        )
+        if shape == "box" and min(args.box_size_x, args.box_size_y, args.box_size_z) > 0:
+            body_domain = np.asarray([args.box_size_x, args.box_size_y, args.box_size_z], dtype=float) * 0.5
+            body_radius = box_reference_radius(body_domain)
+        else:
+            body_domain = args.radius
+            body_radius = args.radius
+        if args.surface_only:
+            points = np.empty((0, 3))
+        else:
+            cached_seeds = cache_get("seeds", cache_keys["seeds"], {"points": (None, 3)})
+            if cached_seeds is not None:
+                points = cached_seeds["points"]
+            else:
+                points = generate_body_points(shape, args.points, body_domain, args.random_seed)
+                cache_put("seeds", cache_keys["seeds"], {"points": points})
 
-    edges = [] if args.surface_only else compute_voronoi_edges(points)
-    min_strut_length = 0.0 if args.no_optimize else args.min_strut_length * body_radius
+    checkpoint()
+    report("computing-voronoi", "Počítám 3D Voronoi topologii.", 0.16)
+    voronoi_started = perf_counter()
+    if args.surface_only:
+        edges = []
+    elif triangle_domain is not None:
+        cached_voronoi = cache_get("volume-voronoi", cache_keys["volume-voronoi"], {"edges": (None, 2, 3)})
+        if cached_voronoi is not None:
+            edges = [(edge[0], edge[1]) for edge in cached_voronoi["edges"]]
+        else:
+            domain_minimum, domain_maximum = triangle_domain.bounds()
+            edges = compute_voronoi_edges_with_ghost_seeds(points, domain_minimum, domain_maximum)
+            cache_put("volume-voronoi", cache_keys["volume-voronoi"], {"edges": np.asarray(edges, dtype=float).reshape((-1, 2, 3))})
+    else:
+        cached_voronoi = cache_get("volume-voronoi", cache_keys["volume-voronoi"], {"edges": (None, 2, 3)})
+        if cached_voronoi is not None:
+            edges = [(edge[0], edge[1]) for edge in cached_voronoi["edges"]]
+        else:
+            edges = compute_voronoi_edges(points)
+            cache_put("volume-voronoi", cache_keys["volume-voronoi"], {"edges": np.asarray(edges, dtype=float).reshape((-1, 2, 3))})
+    voronoi_seconds = perf_counter() - voronoi_started
+    voronoi_vertex_count = 0 if args.surface_only else compute_voronoi_vertex_count(points)
+    min_strut_length = 0.0 if args.no_optimize else (args.min_strut_length_mm if args.min_strut_length_mm > 0 else args.min_strut_length * body_radius)
     connector_min_length = 0.0 if args.no_optimize else args.connector_min_length * body_radius
     surface_seed_count = resolve_surface_seed_count(shape, args.surface_points, args.points)
     if args.surface_only:
         inside_edges = []
         optimization_stats = OptimizationStats(raw_edges=0, inside_edges=0, removed_short_edges=0)
-    elif body_mesh is not None:
-        inside_edges, optimization_stats = optimize_mesh_strut_network(
-            edges,
-            body_mesh,
-            min_strut_length,
-            enabled=not args.no_optimize,
+    elif triangle_domain is not None:
+        cached_clipped = cache_get("clipped-interior", cache_keys["clipped-interior"], {"edges": (None, 2, 3)})
+        if cached_clipped is not None:
+            inside_edges = [(edge[0], edge[1]) for edge in cached_clipped["edges"]]
+            prefiltered_edges = edges
+            cached_endpoints = unique_edge_points(inside_edges, decimals=6)
+            endpoint_distances = (
+                np.abs(triangle_domain.signed_distance(np.asarray(cached_endpoints)))
+                if len(cached_endpoints)
+                else np.empty(0)
+            )
+            domain_clipping = {
+                "inputSegmentCount": int(len(edges)),
+                "outputIntervalCount": int(len(inside_edges)),
+                "removedShortIntervalCount": 0,
+                "surfaceIntersectionNodeCount": int(np.count_nonzero(endpoint_distances <= max(args.tube_radius, 0.02))),
+                "cacheHit": True,
+            }
+        else:
+            prefiltered_edges = filter_edges_by_length(edges, min_strut_length * 0.15) if not args.no_optimize else edges
+            imported_voxel_size = resolve_voxel_size(args.tube_radius * 2.0, args.quality_preset, args.voxel_size_mm)
+            report("clipping-interior", "Ořezávám vnitřní Voronoi hrany podle tělesa.", 0.24)
+            inside_edges, domain_clipping = clip_edges_to_domain(
+                prefiltered_edges,
+                triangle_domain,
+                min(imported_voxel_size, args.tube_radius * 0.5),
+                min_strut_length,
+                cancellation_token=cancellation_token,
+            )
+            cache_put("clipped-interior", cache_keys["clipped-interior"], {"edges": np.asarray(inside_edges, dtype=float).reshape((-1, 2, 3))})
+        optimization_stats = OptimizationStats(
+            raw_edges=len(edges),
+            inside_edges=len(inside_edges),
+            removed_short_edges=len(edges) - len(prefiltered_edges) + domain_clipping["removedShortIntervalCount"],
         )
     else:
-        inside_edges, optimization_stats = optimize_strut_network(
-            shape,
-            edges,
-            body_radius,
-            min_strut_length,
-            enabled=not args.no_optimize,
+        cached_clipped = cache_get("clipped-interior", cache_keys["clipped-interior"], {"edges": (None, 2, 3)})
+        if cached_clipped is not None:
+            inside_edges = [(edge[0], edge[1]) for edge in cached_clipped["edges"]]
+            optimization_stats = OptimizationStats(raw_edges=len(edges), inside_edges=len(inside_edges), removed_short_edges=0)
+        else:
+            inside_edges, optimization_stats = optimize_strut_network(
+                shape,
+                edges,
+                body_domain,
+                min_strut_length,
+                enabled=not args.no_optimize,
+            )
+            cache_put("clipped-interior", cache_keys["clipped-interior"], {"edges": np.asarray(inside_edges, dtype=float).reshape((-1, 2, 3))})
+
+    conformal_result = None
+    conformal_surface_radius = args.surface_tube_radius
+    conformal_connector_radius = args.tube_radius
+    conformal_node_radius = args.surface_tube_radius * args.node_radius_scale
+    if (
+        triangle_domain is not None
+        and args.boundary_structure_mode == "conformal-surface"
+        and not args.no_shell
+        and not args.surface_only
+    ):
+        report("creating-conformal-surface", "Vytvářím konformní povrchovou Voronoi síť.", 0.34)
+        surface_diameter = args.surface_strut_diameter_mm if args.surface_strut_diameter_mm > 0 else args.tube_radius * 2.0
+        conformal_surface_radius = surface_diameter * 0.5
+        conformal_connector_radius = (
+            args.surface_connector_diameter_mm * 0.5
+            if args.surface_connector_diameter_mm > 0
+            else args.tube_radius
         )
+        conformal_node_radius = (
+            args.surface_node_radius_mm
+            if args.surface_node_radius_mode == "custom" and args.surface_node_radius_mm > 0
+            else conformal_surface_radius * args.node_radius_scale
+        )
+        characteristic_cell_size = (
+            args.target_cell_size_mm
+            if args.target_cell_size_mm > 0
+            else float((input_validation["absoluteVolumeMm3"] / max(len(points), 1)) ** (1.0 / 3.0))
+        )
+        automatic_sampling_step = min(characteristic_cell_size / 4.0, surface_diameter / 2.0)
+        sampling_step = (
+            args.surface_sampling_step_mm
+            if args.surface_sampling_mode == "custom" and args.surface_sampling_step_mm > 0
+            else automatic_sampling_step
+        )
+        sampling_step = float(np.clip(sampling_step, 0.05, max(characteristic_cell_size, 0.05)))
+        inset = (
+            args.surface_inset_mm
+            if args.surface_inset_mode == "custom"
+            else conformal_surface_radius
+        )
+        surface_parameters = SurfaceVoronoiParameters(
+            sampling_step_mm=sampling_step,
+            strut_radius_mm=conformal_surface_radius,
+            node_radius_mm=conformal_node_radius,
+            placement_mode=args.surface_placement_mode,
+            inset_mm=max(0.0, inset),
+            smoothing_iterations=max(0, args.surface_smoothing_iterations),
+            smoothing_strength=float(np.clip(args.surface_smoothing_strength, 0.0, 1.0)),
+            connector_spacing_mm=max(args.surface_connector_spacing_mm, 1e-6),
+            connector_maximum_length_mm=max(args.surface_connector_maximum_length_mm, 0.0),
+            connector_radius_mm=conformal_connector_radius,
+            minimum_connectors_per_component=max(0, args.minimum_connectors_per_surface_component),
+            maximum_working_triangles=max(100, args.maximum_surface_working_triangles),
+            topology_weld_reference_mm=max(0.0, args.surface_topology_weld_reference_mm),
+        )
+        cached_surface = cache_get("placed-surface", cache_keys["placed-surface"])
+        if cached_surface is not None:
+            decode_edges = lambda name: [(edge[0], edge[1]) for edge in cached_surface[name]]
+            cached_metadata = json.loads(bytes(cached_surface["metadata"].astype(np.uint8)).decode("utf-8"))
+            conformal_result = SurfaceVoronoiResult(
+                decode_edges("raw"),
+                decode_edges("smoothed"),
+                decode_edges("placed"),
+                cached_surface["surface_nodes"],
+                decode_edges("connectors"),
+                cached_surface["connector_nodes"],
+                cached_metadata,
+            )
+        else:
+            cached_surface_graph = cache_get("surface-graph", cache_keys["surface-graph"])
+            if cached_surface_graph is not None:
+                decode_graph_edges = lambda name: [(edge[0], edge[1]) for edge in cached_surface_graph[name]]
+                base_surface_metadata = json.loads(bytes(cached_surface_graph["metadata"].astype(np.uint8)).decode("utf-8"))
+                conformal_result = place_conformal_surface_graph(
+                    triangle_domain,
+                    inside_edges,
+                    surface_parameters,
+                    decode_graph_edges("raw"),
+                    decode_graph_edges("smoothed"),
+                    base_surface_metadata,
+                    connect_to_interior=args.connect_surface_to_interior,
+                )
+            else:
+                conformal_result = generate_conformal_surface(
+                    triangle_domain,
+                    points,
+                    inside_edges,
+                    surface_parameters,
+                    connect_to_interior=args.connect_surface_to_interior,
+                )
+                base_surface_metadata = {
+                    "surfaceVoronoiStatistics": conformal_result.metadata["surfaceVoronoiStatistics"],
+                    "surfaceGraph": conformal_result.metadata["surfaceGraph"],
+                }
+                cache_put("surface-graph", cache_keys["surface-graph"], {
+                    "raw": np.asarray(conformal_result.raw_surface_segments, dtype=float).reshape((-1, 2, 3)),
+                    "smoothed": np.asarray(conformal_result.smoothed_surface_segments, dtype=float).reshape((-1, 2, 3)),
+                    "metadata": np.frombuffer(json.dumps(base_surface_metadata).encode("utf-8"), dtype=np.uint8),
+                })
+            cache_put("placed-surface", cache_keys["placed-surface"], {
+                "raw": np.asarray(conformal_result.raw_surface_segments, dtype=float).reshape((-1, 2, 3)),
+                "smoothed": np.asarray(conformal_result.smoothed_surface_segments, dtype=float).reshape((-1, 2, 3)),
+                "placed": np.asarray(conformal_result.surface_segments, dtype=float).reshape((-1, 2, 3)),
+                "surface_nodes": np.asarray(conformal_result.surface_nodes, dtype=float).reshape((-1, 3)),
+                "connectors": np.asarray(conformal_result.connector_segments, dtype=float).reshape((-1, 2, 3)),
+                "connector_nodes": np.asarray(conformal_result.connector_nodes, dtype=float).reshape((-1, 3)),
+                "metadata": np.frombuffer(json.dumps(conformal_result.metadata).encode("utf-8"), dtype=np.uint8),
+            })
 
     if args.no_shell:
         shell_mesh = pv.PolyData()
         surface_edges: list[tuple[np.ndarray, np.ndarray]] = []
     elif body_mesh is not None:
-        shell_mesh, surface_edges = create_mesh_surface_shell(
-            body_mesh,
-            surface_seed_count,
-            args.surface_tube_radius,
-            args.random_seed + 1000,
-            min_strut_length,
-        )
+        shell_mesh = pv.PolyData()
+        surface_edges = conformal_result.surface_segments if conformal_result is not None else []
     else:
         shell_mesh, surface_edges = create_surface_shell(
             shape,
-            body_radius,
+            body_domain,
             surface_seed_count,
             args.surface_tube_radius,
             args.random_seed + 1000,
@@ -1485,20 +2323,22 @@ def main() -> None:
         )
 
     connector_edges = (
-        []
-        if args.surface_only
+        conformal_result.connector_segments
+        if conformal_result is not None
+        else []
+        if args.surface_only or body_mesh is not None
         else create_connection_edges(
             shape,
             inside_edges,
             surface_edges,
-            body_radius,
+            body_domain,
             args.connector_band * body_radius,
             args.connector_max_length * body_radius,
             connector_min_length,
             body_mesh,
         )
     )
-    if not args.no_optimize and not args.surface_only:
+    if not args.no_optimize and not args.surface_only and body_mesh is None:
         [inside_edges, connector_edges, surface_edges], global_collapsed = collapse_short_edges_across_groups(
             [inside_edges, connector_edges, surface_edges],
             min_strut_length,
@@ -1518,17 +2358,8 @@ def main() -> None:
                     if edge_stays_inside_mesh(start, end, body_mesh) or edge_stays_inside_mesh(end, start, body_mesh)
                 ]
             else:
-                inside_edges = filter_edges_inside_body(shape, inside_edges, body_radius)
-                connector_edges = filter_edges_inside_body(shape, connector_edges, body_radius)
-
-    if body_mesh is not None and not args.surface_only:
-        inside_edges, connector_edges, disconnected_removed = keep_edges_connected_to_surface(
-            inside_edges,
-            connector_edges,
-            surface_edges,
-        )
-        if disconnected_removed:
-            print(f"Removed disconnected imported-mesh struts: {disconnected_removed}")
+                inside_edges = filter_edges_inside_body(shape, inside_edges, body_domain)
+                connector_edges = filter_edges_inside_body(shape, connector_edges, body_domain)
 
     support_edges = (
         []
@@ -1536,25 +2367,274 @@ def main() -> None:
         else create_dangling_support_edges(
             inside_edges + connector_edges,
             surface_edges,
-            body_radius,
+            body_domain,
             connector_min_length,
             args.support_max_length * body_radius,
         )
     )
-    tube_mesh = create_tube_mesh(inside_edges, args.tube_radius)
-    shell_mesh = create_tube_mesh(surface_edges, args.surface_tube_radius).clean() if surface_edges else pv.PolyData()
-    connector_mesh = create_tube_mesh(connector_edges + support_edges, args.tube_radius)
-    if args.no_nodes:
+
+    removed_component_count = 0
+    removed_component_strut_count = 0
+    if args.remove_disconnected_components:
+        [inside_edges, connector_edges, support_edges, surface_edges], removed_component_count, removed_component_strut_count = keep_largest_graph_component(
+            [inside_edges, connector_edges, support_edges, surface_edges]
+        )
+
+    used_mesh_engine = args.mesh_engine
+
+    if used_mesh_engine == "legacy-primitives" and shape == "box" and args.boundary_mode == "exact":
+        inner_node_radius = args.tube_radius * args.node_radius_scale if not args.no_nodes else args.tube_radius
+        surface_node_radius = args.surface_tube_radius * args.node_radius_scale if not args.no_nodes else args.surface_tube_radius
+        exact_inset_radius = max(args.tube_radius, args.surface_tube_radius, inner_node_radius, surface_node_radius)
+        inside_edges = clip_final_geometry_to_domain(inside_edges, shape, body_domain, exact_inset_radius, args.boundary_mode)
+        connector_edges = clip_final_geometry_to_domain(connector_edges, shape, body_domain, exact_inset_radius, args.boundary_mode)
+        support_edges = clip_final_geometry_to_domain(support_edges, shape, body_domain, exact_inset_radius, args.boundary_mode)
+        surface_edges = clip_final_geometry_to_domain(surface_edges, shape, body_domain, exact_inset_radius, args.boundary_mode)
+
+    all_final_edges = inside_edges + connector_edges + support_edges + surface_edges
+    graph_stats = analyze_strut_graph(all_final_edges)
+    implicit_stats: dict = {"enabled": False}
+    cleanup_seconds = 0.0
+    validation_seconds = 0.0
+
+    voxel_size = resolve_voxel_size(args.tube_radius * 2.0, args.quality_preset, args.voxel_size_mm)
+    cached_final_mesh = (
+        cache_get("final-mesh", cache_keys["final-mesh"], {"points": (None, 3), "faces": (None,)})
+        if used_mesh_engine == "implicit-union"
+        else None
+    )
+    if cached_final_mesh is not None:
+        combined_mesh = pv.PolyData(cached_final_mesh["points"], cached_final_mesh["faces"].astype(np.int64))
+        implicit_stats = {
+            "enabled": True,
+            "cacheHit": True,
+            "voxelSizeMm": float(voxel_size),
+            "gridSizeX": 0,
+            "gridSizeY": 0,
+            "gridSizeZ": 0,
+            "totalVoxelCount": 0,
+            "estimatedMemoryBytes": 0,
+            "generationTimeSeconds": 0.0,
+        }
+        tube_mesh = combined_mesh
+        shell_mesh = pv.PolyData()
+        connector_mesh = pv.PolyData()
+        node_mesh = pv.PolyData()
+    elif used_mesh_engine == "implicit-union":
+        report("generating-final-mesh", "Připravuji implicitní watertight mesh.", 0.48)
+        capsules = [
+            CapsulePrimitive(np.asarray(start), np.asarray(end), args.tube_radius)
+            for start, end in inside_edges + support_edges
+        ] + [
+            CapsulePrimitive(np.asarray(start), np.asarray(end), conformal_connector_radius)
+            for start, end in connector_edges
+        ] + [
+            CapsulePrimitive(np.asarray(start), np.asarray(end), conformal_surface_radius)
+            for start, end in surface_edges
+        ]
+        node_radii: dict[tuple[float, float, float], tuple[np.ndarray, float]] = {}
+        if not args.no_nodes:
+            for group_edges, radius in (
+                (inside_edges + support_edges, args.tube_radius * args.node_radius_scale),
+                (connector_edges, conformal_connector_radius * args.node_radius_scale),
+                (surface_edges, conformal_node_radius),
+            ):
+                for point in unique_edge_points(group_edges, decimals=6):
+                    key = point_key_3d(point, decimals=6)
+                    previous = node_radii.get(key)
+                    if previous is None or radius > previous[1]:
+                        node_radii[key] = (np.asarray(point), float(radius))
+        spheres = [SpherePrimitive(center, radius) for center, radius in node_radii.values()]
+        domain = triangle_domain if triangle_domain is not None else BoxDomain(as_half_sizes(body_domain))
+        combined_mesh, implicit_stats = generate_implicit_union_mesh(
+            domain,
+            capsules,
+            spheres,
+            voxel_size,
+            exact_domain_intersection=triangle_domain is not None or args.boundary_mode == "exact",
+            progress_callback=runtime_context.progress_callback if runtime_context is not None else None,
+            cancellation_token=cancellation_token,
+        )
+        tube_mesh = combined_mesh
+        shell_mesh = pv.PolyData()
+        connector_mesh = pv.PolyData()
         node_mesh = pv.PolyData()
     else:
-        inner_node_mesh = create_node_sphere_mesh(
-            inside_edges + connector_edges + support_edges,
-            args.tube_radius * args.node_radius_scale,
-        )
-        surface_node_mesh = create_node_sphere_mesh(surface_edges, args.surface_tube_radius * args.node_radius_scale)
-        node_mesh = combine_meshes([inner_node_mesh, surface_node_mesh])
+        tube_mesh = create_tube_mesh(inside_edges, args.tube_radius)
+        shell_mesh = create_tube_mesh(surface_edges, args.surface_tube_radius).clean() if surface_edges else pv.PolyData()
+        connector_mesh = create_tube_mesh(connector_edges + support_edges, args.tube_radius)
+        if args.no_nodes:
+            node_mesh = pv.PolyData()
+        else:
+            inner_node_mesh = create_node_sphere_mesh(
+                inside_edges + connector_edges + support_edges,
+                args.tube_radius * args.node_radius_scale,
+            )
+            surface_node_mesh = create_node_sphere_mesh(surface_edges, args.surface_tube_radius * args.node_radius_scale)
+            node_mesh = combine_meshes([inner_node_mesh, surface_node_mesh])
+        combined_mesh = combine_meshes([shell_mesh, tube_mesh, connector_mesh, node_mesh])
 
-    export_mesh = combine_meshes([shell_mesh, tube_mesh, connector_mesh, node_mesh])
+    final_removed_mesh_components = 0
+    if args.final_component_mode == "keep-largest" and combined_mesh.n_cells:
+        connected_output = combined_mesh.connectivity()
+        output_regions = np.unique(connected_output.cell_data["RegionId"])
+        if len(output_regions) > 1:
+            largest_output = connected_output.connectivity(extraction_mode="largest").extract_surface().triangulate().clean()
+            combined_mesh = pv.PolyData(
+                np.asarray(largest_output.points).copy(),
+                np.asarray(largest_output.faces).copy(),
+            ).clean()
+            final_removed_mesh_components = int(len(output_regions) - 1)
+
+    validation_started = perf_counter()
+    validation_before = validate_mesh(combined_mesh)
+    validation_seconds += perf_counter() - validation_started
+    cleanup_started = perf_counter()
+    export_mesh = repair_mesh_for_export(combined_mesh)
+    cleanup_seconds = perf_counter() - cleanup_started
+    if used_mesh_engine == "implicit-union" and cached_final_mesh is None:
+        cache_put("final-mesh", cache_keys["final-mesh"], {
+            "points": np.asarray(export_mesh.points),
+            "faces": np.asarray(export_mesh.faces),
+        })
+    validation_started = perf_counter()
+    validation_after = validate_mesh(export_mesh)
+    validation_seconds += perf_counter() - validation_started
+    requested_sizes = as_half_sizes(body_domain) * 2.0 if shape == "box" else None
+    metadata = build_generation_metadata(
+        args,
+        points,
+        voronoi_vertex_count,
+        len(edges),
+        all_final_edges,
+        optimization_stats,
+        graph_stats,
+        export_mesh,
+        validation_before,
+        validation_after,
+        requested_sizes,
+        removed_component_count,
+        removed_component_strut_count,
+    )
+    metadata["meshEngine"] = used_mesh_engine
+    metadata["clippingImplementation"] = (
+        "implicit-sdf-intersection"
+        if used_mesh_engine == "implicit-union" and args.boundary_mode == "exact"
+        else "eroded-centerline-approximation"
+        if used_mesh_engine == "legacy-primitives" and args.boundary_mode == "exact" and shape == "box"
+        else "centerline-domain-filter"
+    )
+    metadata["qualityPreset"] = args.quality_preset
+    metadata["voxelSizeMm"] = implicit_stats.get("voxelSizeMm")
+    implicit_stats["cleanupTimeSeconds"] = float(cleanup_seconds)
+    implicit_stats["validationTimeSeconds"] = float(validation_seconds)
+    if implicit_stats.get("enabled"):
+        implicit_stats["generationTimeSeconds"] += float(cleanup_seconds + validation_seconds)
+    metadata["implicitMeshing"] = implicit_stats
+    metadata["meshValidationBeforeCleanup"] = validation_before
+    metadata["meshValidationAfterCleanup"] = validation_after
+    domain_volume = (
+        float(input_validation["absoluteVolumeMm3"])
+        if triangle_domain is not None
+        else float(np.prod(as_half_sizes(body_domain) * 2.0))
+    )
+    volume_stats = density_statistics(domain_volume, validation_after.get("componentVolumesMm3", [validation_after["absoluteVolumeMm3"]]))
+    metadata["volumeStatistics"] = volume_stats
+    metadata["massEstimate"] = mass_estimate(
+        volume_stats,
+        args.material_density_g_per_cm3 if args.material_density_g_per_cm3 > 0 else None,
+    )
+    metadata["densityControl"] = {
+        "mode": "direct-dimensions",
+        "selectedGlobalRadiusScale": 1.0,
+        "finalVerifiedDensity": volume_stats["relativeDensity"],
+    }
+    metadata["cache"] = {
+        "enabled": bool(args.cache_enabled),
+        **cache_events,
+        "hitCount": int(sum(1 for event in cache_events.values() if event.get("hit"))),
+        "missCount": int(sum(1 for event in cache_events.values() if not event.get("hit"))),
+        "totalCacheReadTimeSeconds": float(sum(event.get("loadTimeSeconds", 0.0) for event in cache_events.values())),
+        "totalCacheWriteTimeSeconds": float(sum(event.get("writeTimeSeconds", 0.0) for event in cache_events.values())),
+    }
+    if runtime_context is not None:
+        metadata["executionMode"] = "persistent-worker"
+        metadata["memoryCache"] = runtime_context.metadata()
+        metadata["worker"] = {
+            "sameProcessForAllEvaluations": True,
+            "domainReused": runtime_context.domain_reused,
+            "locatorReused": runtime_context.locator_reused,
+            "topologySessionHit": runtime_context.session_hit,
+        }
+    if triangle_domain is not None:
+        violation_tolerance = max(0.02, float(voxel_size) * 0.25)
+        domain_distances = triangle_domain.signed_distance(np.asarray(export_mesh.points))
+        outside_mask = domain_distances > violation_tolerance
+        source_path = Path(input_mesh_path)
+        metadata.update({
+            "sourceType": "imported-mesh",
+            "sourceFile": {
+                "originalName": args.source_original_name or source_path.name,
+                "format": input_validation.get("detectedFormat", source_path.suffix.lower().lstrip(".")),
+                "fileSizeBytes": int(input_validation.get("fileSizeBytes", source_path.stat().st_size)),
+                "importScale": float(args.import_scale),
+            },
+            "inputMeshValidation": input_validation,
+            "componentMode": args.component_mode,
+            "finalComponentMode": args.final_component_mode,
+            "boundaryStructureMode": args.boundary_structure_mode,
+            "removedFinalComponentCount": final_removed_mesh_components,
+            "domainType": "triangle-mesh",
+            "domain": triangle_domain.metadata(),
+            "seedParameters": {
+                "seedCount": int(args.points),
+                "targetCellSizeMm": float(args.target_cell_size_mm) if args.target_cell_size_mm > 0 else None,
+                "randomSeed": int(args.random_seed),
+                "boundaryOffsetMm": float(args.boundary_offset_mm),
+                "maximumSamplingAttempts": int(args.maximum_sampling_attempts),
+            },
+            "seedSampling": seed_sampling,
+            "voronoiStatistics": {
+                "vertexCount": int(voronoi_vertex_count),
+                "rawEdgeCount": int(len(edges)),
+                "generationTimeSeconds": float(voronoi_seconds),
+            },
+            "domainClipping": domain_clipping,
+            "outputMeshValidation": validation_after,
+            "maximumDomainViolationMm": float(max(0.0, np.max(domain_distances))) if len(domain_distances) else 0.0,
+            "outsideVertexCount": int(np.count_nonzero(outside_mask)),
+            "outsideVertexRatio": float(np.mean(outside_mask)) if len(outside_mask) else 0.0,
+            "domainViolationToleranceMm": float(violation_tolerance),
+            "nodeRadiusMm": float(args.tube_radius * args.node_radius_scale),
+        })
+        if conformal_result is not None:
+            metadata.update(conformal_result.metadata)
+            metadata["conformalSurfaceParameters"] = {
+                "surfaceStrutDiameterMm": float(conformal_surface_radius * 2.0),
+                "surfaceNodeRadiusMm": float(conformal_node_radius),
+                "surfacePlacementMode": args.surface_placement_mode,
+                "surfaceInsetMm": float(
+                    args.surface_inset_mm
+                    if args.surface_inset_mode == "custom"
+                    else conformal_surface_radius
+                ),
+                "surfaceSmoothingIterations": int(args.surface_smoothing_iterations),
+                "surfaceSmoothingStrength": float(args.surface_smoothing_strength),
+                "connectSurfaceToInterior": bool(args.connect_surface_to_interior),
+                "connectorDiameterMm": float(conformal_connector_radius * 2.0),
+            }
+            metadata["combinedConnectivity"] = {
+                "interiorGraphComponentCount": int(analyze_strut_graph(inside_edges)["connectedComponentCount"]),
+                "surfaceGraphComponentCount": int(
+                    conformal_result.metadata["surfaceGraph"]["connectedComponentCount"]
+                ),
+                "connectorCount": int(len(connector_edges)),
+                "unconnectedSurfaceComponentCount": int(
+                    conformal_result.metadata["surfaceConnections"]["unconnectedSurfaceComponentCount"]
+                ),
+                "combinedGraphComponentCount": int(graph_stats["connectedComponentCount"]),
+                "finalMeshComponentCount": int(validation_after["connectedComponentCount"]),
+            }
     print_mesh_summary(
         inside_edges,
         connector_edges,
@@ -1568,11 +2648,73 @@ def main() -> None:
         export_mesh,
     )
 
+    export_seconds = 0.0
     if args.export_stl:
+        checkpoint()
+        report("exporting-files", "Exportuji výsledné STL.", 0.94)
+        export_started = perf_counter()
         export_stl(export_mesh, args.export_stl)
+        export_seconds = perf_counter() - export_started
+
+    metadata["exportTimeSeconds"] = float(export_seconds)
+    metadata["totalGenerationTimeSeconds"] = float(perf_counter() - overall_started)
+    if args.cache_enabled:
+        cache.cleanup()
+
+    requested_debug = (
+        set(ALL_LAYERS)
+        if args.debug_mode == "all"
+        else {name for name in args.debug_layers.split(",") if name in ALL_LAYERS}
+        if args.debug_mode == "requested"
+        else set()
+    )
+    if requested_debug and args.debug_manifest_json and args.debug_buffer_bin:
+        checkpoint()
+        interior_nodes = unique_edge_points(inside_edges + support_edges, decimals=6)
+        debug_candidates: dict[str, object] = {
+            "seed-points": points,
+            "raw-volume-voronoi-edges": edges,
+            "clipped-interior-centerlines": inside_edges + support_edges,
+            "interior-nodes": interior_nodes,
+            "surface-to-interior-connectors": connector_edges,
+            "combined-centerline-graph": all_final_edges,
+            "final-implicit-mesh": np.asarray(export_mesh.points)[
+                np.asarray(export_mesh.faces).reshape((-1, 4))[:, 1:]
+            ],
+        }
+        if conformal_result is not None:
+            debug_candidates.update({
+                "raw-surface-voronoi-segments": conformal_result.raw_surface_segments,
+                "smoothed-surface-centerlines": conformal_result.smoothed_surface_segments,
+                "placed-surface-centerlines": surface_edges,
+                "surface-nodes": conformal_result.surface_nodes,
+            })
+        selected = {name: debug_candidates[name] for name in sorted(requested_debug) if name in debug_candidates}
+        debug_manifest = write_debug_payload(
+            selected,
+            args.debug_manifest_json,
+            args.debug_buffer_bin,
+            max(1, args.debug_maximum_points),
+            max(1, args.debug_maximum_segments),
+        )
+        metadata["debugGeometry"] = {
+            "formatVersion": debug_manifest["formatVersion"],
+            "requestedLayers": sorted(requested_debug),
+            "availableLayers": sorted(debug_manifest["layers"]),
+            "totalByteLength": debug_manifest["totalByteLength"],
+        }
+
+    if args.metadata_json:
+        checkpoint()
+        metadata_path = Path(args.metadata_json)
+        metadata_path.parent.mkdir(parents=True, exist_ok=True)
+        metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+        print(f"Exported metadata: {metadata_path.resolve()}")
 
     if not args.no_show:
         show_scene(shape, points, inside_edges, tube_mesh, connector_mesh, shell_mesh, node_mesh, debug=args.debug)
+    report("result-ready", "Výsledná geometrie je připravena.", 1.0)
+    return metadata
 
 
 if __name__ == "__main__":

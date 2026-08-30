@@ -1,12 +1,19 @@
 {
   "name": "latticecore",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "vite build",
-    "preview": "vite preview --host 127.0.0.1 --port 4173"
+    "preview": "vite preview --host 127.0.0.1 --port 4173",
+    "test:server": "node --test server/*.test.js",
+    "test:python": "node scripts/run-python-tests.mjs",
+    "test:all": "npm run test:server && npm run test:python && npm run build",
+    "check": "npm run test:all && npm audit --audit-level=high"
   },
   "dependencies": {
     "three": "^0.166.1"

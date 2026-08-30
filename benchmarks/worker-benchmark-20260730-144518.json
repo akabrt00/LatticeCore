@@ -1,0 +1,1706 @@
+{
+  "schemaVersion": 1,
+  "timestamp": "2026-07-30T12:43:36.962918+00:00",
+  "python": "3.13.0",
+  "scenarios": {
+    "parametric-box-direct": {
+      "firstPersistentRun": {
+        "totalTimeSeconds": 7.873741899995366,
+        "phaseMetrics": {
+          "job-start": {
+            "memory": {
+              "processWorkingSetBytes": 165187584,
+              "processPeakWorkingSetBytes": 165187584,
+              "pythonTrackedCurrentBytes": 127908,
+              "pythonTrackedPeakBytes": 128777,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 0
+            }
+          },
+          "reading-input": {
+            "memory": {
+              "processWorkingSetBytes": 165298176,
+              "processPeakWorkingSetBytes": 165298176,
+              "pythonTrackedCurrentBytes": 136054,
+              "pythonTrackedPeakBytes": 136867,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 0
+            }
+          },
+          "loading-memory-session": {
+            "memoryCacheHit": false,
+            "memory": {
+              "processWorkingSetBytes": 165314560,
+              "processPeakWorkingSetBytes": 165314560,
+              "pythonTrackedCurrentBytes": 144999,
+              "pythonTrackedPeakBytes": 145868,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 0
+            }
+          },
+          "loading-disk-cache": {
+            "memory": {
+              "processWorkingSetBytes": 170070016,
+              "processPeakWorkingSetBytes": 170070016,
+              "pythonTrackedCurrentBytes": 295702,
+              "pythonTrackedPeakBytes": 512094,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1584
+            }
+          },
+          "computing-voronoi": {
+            "memory": {
+              "processWorkingSetBytes": 165814272,
+              "processPeakWorkingSetBytes": 165814272,
+              "pythonTrackedCurrentBytes": 163938,
+              "pythonTrackedPeakBytes": 470457,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 192
+            }
+          },
+          "generating-final-mesh": {
+            "completedBlocks": 8,
+            "totalBlocks": 8,
+            "memory": {
+              "processWorkingSetBytes": 170180608,
+              "processPeakWorkingSetBytes": 170180608,
+              "pythonTrackedCurrentBytes": 599931,
+              "pythonTrackedPeakBytes": 1085555,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1584
+            }
+          },
+          "clipping-interior": {
+            "completedBlocks": 2,
+            "totalBlocks": 2,
+            "memory": {
+              "processWorkingSetBytes": 171360256,
+              "processPeakWorkingSetBytes": 171360256,
+              "pythonTrackedCurrentBytes": 1045822,
+              "pythonTrackedPeakBytes": 2293085,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1584
+            }
+          },
+          "exporting-files": {
+            "memory": {
+              "processWorkingSetBytes": 183488512,
+              "processPeakWorkingSetBytes": 204906496,
+              "pythonTrackedCurrentBytes": 472678,
+              "pythonTrackedPeakBytes": 14676685,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 483280
+            }
+          },
+          "result-ready": {
+            "memory": {
+              "processWorkingSetBytes": 184991744,
+              "processPeakWorkingSetBytes": 204906496,
+              "pythonTrackedCurrentBytes": 490230,
+              "pythonTrackedPeakBytes": 14676685,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 483280
+            }
+          }
+        },
+        "ramSession": {
+          "createdNewSession": false,
+          "domainReused": false,
+          "hit": true,
+          "locatorReused": false,
+          "sessionKeyPrefix": "0a13132b7d11",
+          "topologyReused": true
+        },
+        "diskCache": {
+          "clipped-interior": {
+            "hit": true,
+            "keyPrefix": "0b5394450abd",
+            "loadTimeSeconds": 1.4699995517730713e-05,
+            "memoryHit": true
+          },
+          "enabled": true,
+          "final-mesh": {
+            "hit": true,
+            "keyPrefix": "f9c6a06297c9",
+            "loadTimeSeconds": 1.2799995602108538e-05,
+            "memoryHit": true
+          },
+          "hitCount": 4,
+          "missCount": 0,
+          "seeds": {
+            "hit": true,
+            "keyPrefix": "61ad29f3bce4",
+            "loadTimeSeconds": 1.239999255631119e-05,
+            "memoryHit": true
+          },
+          "totalCacheReadTimeSeconds": 5.9699988923966885e-05,
+          "totalCacheWriteTimeSeconds": 0.0,
+          "volume-voronoi": {
+            "hit": true,
+            "keyPrefix": "205698e62c8a",
+            "loadTimeSeconds": 1.9800005247816443e-05,
+            "memoryHit": true
+          }
+        },
+        "processWorkingSetBeforeBytes": 164802560,
+        "processWorkingSetAfterBytes": 185024512,
+        "processPeakWorkingSetBytes": 204906496,
+        "meshVertexCount": 5420,
+        "meshTriangleCount": 10988,
+        "volumeMm3": 54.8312588378917,
+        "watertight": true,
+        "edgeManifold": true,
+        "stlSha256": "025219e1fa156b44edbd2bff8265454af0adc0c83df87a5636c69c8456a01305"
+      },
+      "repeatedRamSessionRun": {
+        "totalTimeSeconds": 7.370347100004437,
+        "phaseMetrics": {
+          "job-start": {
+            "memory": {
+              "processWorkingSetBytes": 185012224,
+              "processPeakWorkingSetBytes": 204906496,
+              "pythonTrackedCurrentBytes": 499796,
+              "pythonTrackedPeakBytes": 500677,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 483280
+            }
+          },
+          "reading-input": {
+            "memory": {
+              "processWorkingSetBytes": 185012224,
+              "processPeakWorkingSetBytes": 204906496,
+              "pythonTrackedCurrentBytes": 507246,
+              "pythonTrackedPeakBytes": 508127,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 483280
+            }
+          },
+          "loading-memory-session": {
+            "memoryCacheHit": true,
+            "memory": {
+              "processWorkingSetBytes": 185012224,
+              "processPeakWorkingSetBytes": 204906496,
+              "pythonTrackedCurrentBytes": 513973,
+              "pythonTrackedPeakBytes": 514854,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 483280
+            }
+          },
+          "computing-voronoi": {
+            "memory": {
+              "processWorkingSetBytes": 185016320,
+              "processPeakWorkingSetBytes": 204906496,
+              "pythonTrackedCurrentBytes": 522177,
+              "pythonTrackedPeakBytes": 523058,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 483280
+            }
+          },
+          "exporting-files": {
+            "memory": {
+              "processWorkingSetBytes": 187158528,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 611388,
+              "pythonTrackedPeakBytes": 14695930,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 483280
+            }
+          },
+          "result-ready": {
+            "memory": {
+              "processWorkingSetBytes": 188522496,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 619876,
+              "pythonTrackedPeakBytes": 14695930,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 483280
+            }
+          }
+        },
+        "ramSession": {
+          "createdNewSession": false,
+          "domainReused": false,
+          "hit": true,
+          "locatorReused": false,
+          "sessionKeyPrefix": "0a13132b7d11",
+          "topologyReused": true
+        },
+        "diskCache": {
+          "clipped-interior": {
+            "hit": true,
+            "keyPrefix": "0b5394450abd",
+            "loadTimeSeconds": 1.4699995517730713e-05,
+            "memoryHit": true
+          },
+          "enabled": true,
+          "final-mesh": {
+            "hit": true,
+            "keyPrefix": "f9c6a06297c9",
+            "loadTimeSeconds": 1.2799995602108538e-05,
+            "memoryHit": true
+          },
+          "hitCount": 4,
+          "missCount": 0,
+          "seeds": {
+            "hit": true,
+            "keyPrefix": "61ad29f3bce4",
+            "loadTimeSeconds": 1.239999255631119e-05,
+            "memoryHit": true
+          },
+          "totalCacheReadTimeSeconds": 5.9699988923966885e-05,
+          "totalCacheWriteTimeSeconds": 0.0,
+          "volume-voronoi": {
+            "hit": true,
+            "keyPrefix": "205698e62c8a",
+            "loadTimeSeconds": 1.9800005247816443e-05,
+            "memoryHit": true
+          }
+        },
+        "processWorkingSetBeforeBytes": 184975360,
+        "processWorkingSetAfterBytes": 188538880,
+        "processPeakWorkingSetBytes": 207441920,
+        "meshVertexCount": 5420,
+        "meshTriangleCount": 10988,
+        "volumeMm3": 54.8312588378917,
+        "watertight": true,
+        "edgeManifold": true,
+        "stlSha256": "025219e1fa156b44edbd2bff8265454af0adc0c83df87a5636c69c8456a01305"
+      }
+    },
+    "imported-open-volume": {
+      "firstPersistentRun": {
+        "totalTimeSeconds": 5.305294200006756,
+        "phaseMetrics": {
+          "job-start": {
+            "memory": {
+              "processWorkingSetBytes": 188534784,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 662209,
+              "pythonTrackedPeakBytes": 663090,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 483280
+            }
+          },
+          "reading-input": {
+            "memory": {
+              "processWorkingSetBytes": 188534784,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 669651,
+              "pythonTrackedPeakBytes": 670532,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 483280
+            }
+          },
+          "loading-memory-session": {
+            "memoryCacheHit": false,
+            "memory": {
+              "processWorkingSetBytes": 188534784,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 676898,
+              "pythonTrackedPeakBytes": 1727480,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 483280
+            }
+          },
+          "building-domain": {
+            "memory": {
+              "processWorkingSetBytes": 188534784,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 683166,
+              "pythonTrackedPeakBytes": 1727480,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 483280
+            }
+          },
+          "loading-disk-cache": {
+            "memory": {
+              "processWorkingSetBytes": 190615552,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 926758,
+              "pythonTrackedPeakBytes": 1727480,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 490912
+            }
+          },
+          "generating-seeds": {
+            "memory": {
+              "processWorkingSetBytes": 190402560,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 761646,
+              "pythonTrackedPeakBytes": 1727480,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 483280
+            }
+          },
+          "computing-voronoi": {
+            "memory": {
+              "processWorkingSetBytes": 190484480,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 774658,
+              "pythonTrackedPeakBytes": 1727480,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 483472
+            }
+          },
+          "clipping-interior": {
+            "completedBlocks": 2,
+            "totalBlocks": 2,
+            "memory": {
+              "processWorkingSetBytes": 192552960,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 1641611,
+              "pythonTrackedPeakBytes": 2136784,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 490912
+            }
+          },
+          "generating-final-mesh": {
+            "completedBlocks": 8,
+            "totalBlocks": 8,
+            "memory": {
+              "processWorkingSetBytes": 191225856,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 1193850,
+              "pythonTrackedPeakBytes": 1727480,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 490912
+            }
+          },
+          "exporting-files": {
+            "memory": {
+              "processWorkingSetBytes": 189530112,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 891098,
+              "pythonTrackedPeakBytes": 7617509,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 713632
+            }
+          },
+          "result-ready": {
+            "memory": {
+              "processWorkingSetBytes": 189980672,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 898682,
+              "pythonTrackedPeakBytes": 7617509,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 713632
+            }
+          }
+        },
+        "ramSession": {
+          "createdNewSession": false,
+          "domainReused": true,
+          "hit": true,
+          "locatorReused": true,
+          "sessionKeyPrefix": "36b320791b06",
+          "topologyReused": true
+        },
+        "diskCache": {
+          "clipped-interior": {
+            "hit": true,
+            "keyPrefix": "745bef5210d8",
+            "loadTimeSeconds": 1.09999964479357e-05,
+            "memoryHit": true
+          },
+          "enabled": true,
+          "final-mesh": {
+            "hit": true,
+            "keyPrefix": "059c48e8769d",
+            "loadTimeSeconds": 1.7300000763498247e-05,
+            "memoryHit": true
+          },
+          "hitCount": 4,
+          "missCount": 0,
+          "seeds": {
+            "hit": true,
+            "keyPrefix": "9d7af36104c8",
+            "loadTimeSeconds": 1.750000228639692e-05,
+            "memoryHit": true
+          },
+          "totalCacheReadTimeSeconds": 6.369999027810991e-05,
+          "totalCacheWriteTimeSeconds": 0.0,
+          "volume-voronoi": {
+            "hit": true,
+            "keyPrefix": "9cc45e46082e",
+            "loadTimeSeconds": 1.789999078027904e-05,
+            "memoryHit": true
+          }
+        },
+        "processWorkingSetBeforeBytes": 188489728,
+        "processWorkingSetAfterBytes": 189980672,
+        "processPeakWorkingSetBytes": 207441920,
+        "meshVertexCount": 2528,
+        "meshTriangleCount": 5064,
+        "volumeMm3": 28.169925993639293,
+        "watertight": true,
+        "edgeManifold": true,
+        "stlSha256": "a74fa1fb42ad9c93b9a5554035708c70e4312c352361ccbcc4371bec6efc4ead"
+      },
+      "repeatedRamSessionRun": {
+        "totalTimeSeconds": 3.0339852000033716,
+        "phaseMetrics": {
+          "job-start": {
+            "memory": {
+              "processWorkingSetBytes": 189960192,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 868120,
+              "pythonTrackedPeakBytes": 869105,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 713632
+            }
+          },
+          "reading-input": {
+            "memory": {
+              "processWorkingSetBytes": 189960192,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 875451,
+              "pythonTrackedPeakBytes": 876332,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 713632
+            }
+          },
+          "loading-memory-session": {
+            "memoryCacheHit": true,
+            "memory": {
+              "processWorkingSetBytes": 189960192,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 882280,
+              "pythonTrackedPeakBytes": 1933386,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 713632
+            }
+          },
+          "building-domain": {
+            "memory": {
+              "processWorkingSetBytes": 189960192,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 888444,
+              "pythonTrackedPeakBytes": 1933386,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 713632
+            }
+          },
+          "computing-voronoi": {
+            "memory": {
+              "processWorkingSetBytes": 189960192,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 897618,
+              "pythonTrackedPeakBytes": 1933386,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 713632
+            }
+          },
+          "exporting-files": {
+            "memory": {
+              "processWorkingSetBytes": 190967808,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 959074,
+              "pythonTrackedPeakBytes": 7630352,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 713632
+            }
+          },
+          "result-ready": {
+            "memory": {
+              "processWorkingSetBytes": 191389696,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 966913,
+              "pythonTrackedPeakBytes": 7630352,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 713632
+            }
+          }
+        },
+        "ramSession": {
+          "createdNewSession": false,
+          "domainReused": true,
+          "hit": true,
+          "locatorReused": true,
+          "sessionKeyPrefix": "36b320791b06",
+          "topologyReused": true
+        },
+        "diskCache": {
+          "clipped-interior": {
+            "hit": true,
+            "keyPrefix": "745bef5210d8",
+            "loadTimeSeconds": 1.09999964479357e-05,
+            "memoryHit": true
+          },
+          "enabled": true,
+          "final-mesh": {
+            "hit": true,
+            "keyPrefix": "059c48e8769d",
+            "loadTimeSeconds": 1.7300000763498247e-05,
+            "memoryHit": true
+          },
+          "hitCount": 4,
+          "missCount": 0,
+          "seeds": {
+            "hit": true,
+            "keyPrefix": "9d7af36104c8",
+            "loadTimeSeconds": 1.750000228639692e-05,
+            "memoryHit": true
+          },
+          "totalCacheReadTimeSeconds": 6.369999027810991e-05,
+          "totalCacheWriteTimeSeconds": 0.0,
+          "volume-voronoi": {
+            "hit": true,
+            "keyPrefix": "9cc45e46082e",
+            "loadTimeSeconds": 1.789999078027904e-05,
+            "memoryHit": true
+          }
+        },
+        "processWorkingSetBeforeBytes": 189927424,
+        "processWorkingSetAfterBytes": 191406080,
+        "processPeakWorkingSetBytes": 207441920,
+        "meshVertexCount": 2528,
+        "meshTriangleCount": 5064,
+        "volumeMm3": 28.169925993639293,
+        "watertight": true,
+        "edgeManifold": true,
+        "stlSha256": "a74fa1fb42ad9c93b9a5554035708c70e4312c352361ccbcc4371bec6efc4ead"
+      }
+    },
+    "imported-conformal": {
+      "firstPersistentRun": {
+        "totalTimeSeconds": 9.897586699997191,
+        "phaseMetrics": {
+          "job-start": {
+            "memory": {
+              "processWorkingSetBytes": 191406080,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 959542,
+              "pythonTrackedPeakBytes": 961169,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 713632
+            }
+          },
+          "reading-input": {
+            "memory": {
+              "processWorkingSetBytes": 191406080,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 966871,
+              "pythonTrackedPeakBytes": 967752,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 713632
+            }
+          },
+          "loading-memory-session": {
+            "memoryCacheHit": false,
+            "memory": {
+              "processWorkingSetBytes": 191406080,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 974268,
+              "pythonTrackedPeakBytes": 2024806,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 713632
+            }
+          },
+          "building-domain": {
+            "memory": {
+              "processWorkingSetBytes": 191406080,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 980483,
+              "pythonTrackedPeakBytes": 2024806,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 713632
+            }
+          },
+          "loading-disk-cache": {
+            "memory": {
+              "processWorkingSetBytes": 192053248,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 1466944,
+              "pythonTrackedPeakBytes": 2024806,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 777839
+            }
+          },
+          "computing-voronoi": {
+            "memory": {
+              "processWorkingSetBytes": 191434752,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 1046105,
+              "pythonTrackedPeakBytes": 2024806,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 713824
+            }
+          },
+          "creating-conformal-surface": {
+            "memory": {
+              "processWorkingSetBytes": 191442944,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 1113188,
+              "pythonTrackedPeakBytes": 2024806,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 721264
+            }
+          },
+          "generating-final-mesh": {
+            "completedBlocks": 8,
+            "totalBlocks": 8,
+            "memory": {
+              "processWorkingSetBytes": 192327680,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 1837032,
+              "pythonTrackedPeakBytes": 2309390,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 777839
+            }
+          },
+          "clipping-interior": {
+            "completedBlocks": 2,
+            "totalBlocks": 2,
+            "memory": {
+              "processWorkingSetBytes": 194150400,
+              "processPeakWorkingSetBytes": 207441920,
+              "pythonTrackedCurrentBytes": 2266697,
+              "pythonTrackedPeakBytes": 2761773,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 777839
+            }
+          },
+          "exporting-files": {
+            "memory": {
+              "processWorkingSetBytes": 197021696,
+              "processPeakWorkingSetBytes": 210534400,
+              "pythonTrackedCurrentBytes": 1612484,
+              "pythonTrackedPeakBytes": 13341061,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1163503
+            }
+          },
+          "result-ready": {
+            "memory": {
+              "processWorkingSetBytes": 197668864,
+              "processPeakWorkingSetBytes": 210534400,
+              "pythonTrackedCurrentBytes": 1622355,
+              "pythonTrackedPeakBytes": 13341061,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1163503
+            }
+          }
+        },
+        "ramSession": {
+          "createdNewSession": false,
+          "domainReused": true,
+          "hit": true,
+          "locatorReused": true,
+          "sessionKeyPrefix": "b782c631cf68",
+          "topologyReused": true
+        },
+        "diskCache": {
+          "clipped-interior": {
+            "hit": true,
+            "keyPrefix": "745bef5210d8",
+            "loadTimeSeconds": 1.2100004823878407e-05,
+            "memoryHit": true
+          },
+          "enabled": true,
+          "final-mesh": {
+            "hit": true,
+            "keyPrefix": "450e0c9b45a4",
+            "loadTimeSeconds": 1.580000389367342e-05,
+            "memoryHit": true
+          },
+          "hitCount": 5,
+          "missCount": 0,
+          "placed-surface": {
+            "hit": true,
+            "keyPrefix": "9782f510fdb2",
+            "loadTimeSeconds": 2.4499997380189598e-05,
+            "memoryHit": true
+          },
+          "seeds": {
+            "hit": true,
+            "keyPrefix": "9d7af36104c8",
+            "loadTimeSeconds": 1.069999416358769e-05,
+            "memoryHit": true
+          },
+          "totalCacheReadTimeSeconds": 7.449999975506216e-05,
+          "totalCacheWriteTimeSeconds": 0.0,
+          "volume-voronoi": {
+            "hit": true,
+            "keyPrefix": "9cc45e46082e",
+            "loadTimeSeconds": 1.1399999493733048e-05,
+            "memoryHit": true
+          }
+        },
+        "processWorkingSetBeforeBytes": 191361024,
+        "processWorkingSetAfterBytes": 197177344,
+        "processPeakWorkingSetBytes": 210534400,
+        "meshVertexCount": 4368,
+        "meshTriangleCount": 8776,
+        "volumeMm3": 61.16426272873335,
+        "watertight": true,
+        "edgeManifold": true,
+        "stlSha256": "b23b85d822784f4c23adf2a1d85c784a09d6af5d5195e399c64f82d3456aa65b"
+      },
+      "repeatedRamSessionRun": {
+        "totalTimeSeconds": 5.349243500008015,
+        "phaseMetrics": {
+          "job-start": {
+            "memory": {
+              "processWorkingSetBytes": 197165056,
+              "processPeakWorkingSetBytes": 210534400,
+              "pythonTrackedCurrentBytes": 1308945,
+              "pythonTrackedPeakBytes": 1310599,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1163503
+            }
+          },
+          "reading-input": {
+            "memory": {
+              "processWorkingSetBytes": 197165056,
+              "processPeakWorkingSetBytes": 210534400,
+              "pythonTrackedCurrentBytes": 1316105,
+              "pythonTrackedPeakBytes": 1317038,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1163503
+            }
+          },
+          "loading-memory-session": {
+            "memoryCacheHit": true,
+            "memory": {
+              "processWorkingSetBytes": 197165056,
+              "processPeakWorkingSetBytes": 210534400,
+              "pythonTrackedCurrentBytes": 1323130,
+              "pythonTrackedPeakBytes": 2374040,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1163503
+            }
+          },
+          "building-domain": {
+            "memory": {
+              "processWorkingSetBytes": 197165056,
+              "processPeakWorkingSetBytes": 210534400,
+              "pythonTrackedCurrentBytes": 1329290,
+              "pythonTrackedPeakBytes": 2374040,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1163503
+            }
+          },
+          "computing-voronoi": {
+            "memory": {
+              "processWorkingSetBytes": 197165056,
+              "processPeakWorkingSetBytes": 210534400,
+              "pythonTrackedCurrentBytes": 1339549,
+              "pythonTrackedPeakBytes": 2374040,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1163503
+            }
+          },
+          "creating-conformal-surface": {
+            "memory": {
+              "processWorkingSetBytes": 197181440,
+              "processPeakWorkingSetBytes": 210534400,
+              "pythonTrackedCurrentBytes": 1385259,
+              "pythonTrackedPeakBytes": 2374040,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1163503
+            }
+          },
+          "exporting-files": {
+            "memory": {
+              "processWorkingSetBytes": 200654848,
+              "processPeakWorkingSetBytes": 211603456,
+              "pythonTrackedCurrentBytes": 1619471,
+              "pythonTrackedPeakBytes": 13123617,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1163503
+            }
+          },
+          "result-ready": {
+            "memory": {
+              "processWorkingSetBytes": 201342976,
+              "processPeakWorkingSetBytes": 211603456,
+              "pythonTrackedCurrentBytes": 1627069,
+              "pythonTrackedPeakBytes": 13123617,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1163503
+            }
+          }
+        },
+        "ramSession": {
+          "createdNewSession": false,
+          "domainReused": true,
+          "hit": true,
+          "locatorReused": true,
+          "sessionKeyPrefix": "b782c631cf68",
+          "topologyReused": true
+        },
+        "diskCache": {
+          "clipped-interior": {
+            "hit": true,
+            "keyPrefix": "745bef5210d8",
+            "loadTimeSeconds": 1.2100004823878407e-05,
+            "memoryHit": true
+          },
+          "enabled": true,
+          "final-mesh": {
+            "hit": true,
+            "keyPrefix": "450e0c9b45a4",
+            "loadTimeSeconds": 1.580000389367342e-05,
+            "memoryHit": true
+          },
+          "hitCount": 5,
+          "missCount": 0,
+          "placed-surface": {
+            "hit": true,
+            "keyPrefix": "9782f510fdb2",
+            "loadTimeSeconds": 2.4499997380189598e-05,
+            "memoryHit": true
+          },
+          "seeds": {
+            "hit": true,
+            "keyPrefix": "9d7af36104c8",
+            "loadTimeSeconds": 1.069999416358769e-05,
+            "memoryHit": true
+          },
+          "totalCacheReadTimeSeconds": 7.449999975506216e-05,
+          "totalCacheWriteTimeSeconds": 0.0,
+          "volume-voronoi": {
+            "hit": true,
+            "keyPrefix": "9cc45e46082e",
+            "loadTimeSeconds": 1.1399999493733048e-05,
+            "memoryHit": true
+          }
+        },
+        "processWorkingSetBeforeBytes": 197132288,
+        "processWorkingSetAfterBytes": 200335360,
+        "processPeakWorkingSetBytes": 211603456,
+        "meshVertexCount": 4368,
+        "meshTriangleCount": 8776,
+        "volumeMm3": 61.16426272873335,
+        "watertight": true,
+        "edgeManifold": true,
+        "stlSha256": "b23b85d822784f4c23adf2a1d85c784a09d6af5d5195e399c64f82d3456aa65b"
+      }
+    },
+    "density-single": {
+      "firstPersistentRun": {
+        "totalTimeSeconds": 14.816260799998417,
+        "phaseMetrics": {
+          "target-start": {
+            "targetIndex": 1,
+            "targetCount": 1,
+            "targetDensityPercent": 8.0,
+            "memory": {
+              "processWorkingSetBytes": 200437760,
+              "processPeakWorkingSetBytes": 211603456,
+              "pythonTrackedCurrentBytes": 1384679,
+              "pythonTrackedPeakBytes": 1385612,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1163503
+            }
+          },
+          "preparing-density-solver": {
+            "memory": {
+              "processWorkingSetBytes": 200437760,
+              "processPeakWorkingSetBytes": 211603456,
+              "pythonTrackedCurrentBytes": 1391070,
+              "pythonTrackedPeakBytes": 1391951,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1163503
+            }
+          },
+          "iteration-start": {
+            "iteration": 2,
+            "scale": 3.0,
+            "quality": "preview",
+            "memory": {
+              "processWorkingSetBytes": 200175616,
+              "processPeakWorkingSetBytes": 211603456,
+              "pythonTrackedCurrentBytes": 1506300,
+              "pythonTrackedPeakBytes": 13297899,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1553343
+            }
+          },
+          "job-start": {
+            "memory": {
+              "processWorkingSetBytes": 200175616,
+              "processPeakWorkingSetBytes": 211603456,
+              "pythonTrackedCurrentBytes": 1571186,
+              "pythonTrackedPeakBytes": 13297899,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1553343
+            }
+          },
+          "reading-input": {
+            "memory": {
+              "processWorkingSetBytes": 200175616,
+              "processPeakWorkingSetBytes": 211603456,
+              "pythonTrackedCurrentBytes": 1578348,
+              "pythonTrackedPeakBytes": 13297899,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1553343
+            }
+          },
+          "loading-memory-session": {
+            "memoryCacheHit": true,
+            "memory": {
+              "processWorkingSetBytes": 200175616,
+              "processPeakWorkingSetBytes": 211603456,
+              "pythonTrackedCurrentBytes": 1585125,
+              "pythonTrackedPeakBytes": 13297899,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1553343
+            }
+          },
+          "computing-voronoi": {
+            "memory": {
+              "processWorkingSetBytes": 200175616,
+              "processPeakWorkingSetBytes": 211603456,
+              "pythonTrackedCurrentBytes": 1593153,
+              "pythonTrackedPeakBytes": 13297899,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1553343
+            }
+          },
+          "loading-disk-cache": {
+            "memory": {
+              "processWorkingSetBytes": 201707520,
+              "processPeakWorkingSetBytes": 211603456,
+              "pythonTrackedCurrentBytes": 1685122,
+              "pythonTrackedPeakBytes": 13297899,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1553343
+            }
+          },
+          "generating-final-mesh": {
+            "completedBlocks": 8,
+            "totalBlocks": 8,
+            "memory": {
+              "processWorkingSetBytes": 202235904,
+              "processPeakWorkingSetBytes": 211603456,
+              "pythonTrackedCurrentBytes": 1937653,
+              "pythonTrackedPeakBytes": 13297899,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1553343
+            }
+          },
+          "clipping-interior": {
+            "completedBlocks": 2,
+            "totalBlocks": 2,
+            "memory": {
+              "processWorkingSetBytes": 203988992,
+              "processPeakWorkingSetBytes": 211603456,
+              "pythonTrackedCurrentBytes": 2381667,
+              "pythonTrackedPeakBytes": 13297899,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 1553343
+            }
+          },
+          "exporting-files": {
+            "memory": {
+              "processWorkingSetBytes": 205385728,
+              "processPeakWorkingSetBytes": 215838720,
+              "pythonTrackedCurrentBytes": 1750954,
+              "pythonTrackedPeakBytes": 15929409,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "result-ready": {
+            "memory": {
+              "processWorkingSetBytes": 205381632,
+              "processPeakWorkingSetBytes": 215838720,
+              "pythonTrackedCurrentBytes": 1767225,
+              "pythonTrackedPeakBytes": 15929409,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "iteration-result": {
+            "iteration": 2,
+            "scale": 3.0,
+            "quality": "preview",
+            "achievedDensityPercent": 68.01977683098677,
+            "cacheHit": false,
+            "memory": {
+              "processWorkingSetBytes": 205381632,
+              "processPeakWorkingSetBytes": 215838720,
+              "pythonTrackedCurrentBytes": 1726281,
+              "pythonTrackedPeakBytes": 15929409,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          }
+        },
+        "ramSession": {
+          "createdNewSession": false,
+          "domainReused": false,
+          "hit": true,
+          "locatorReused": false,
+          "sessionKeyPrefix": "0a13132b7d11",
+          "topologyReused": true
+        },
+        "diskCache": {
+          "clipped-interior": {
+            "hit": true,
+            "keyPrefix": "0b5394450abd",
+            "loadTimeSeconds": 1.1000010999850929e-05,
+            "memoryHit": true
+          },
+          "enabled": true,
+          "final-mesh": {
+            "hit": true,
+            "keyPrefix": "f6f76df8b414",
+            "loadTimeSeconds": 1.960000372491777e-05,
+            "memoryHit": true
+          },
+          "hitCount": 4,
+          "missCount": 0,
+          "seeds": {
+            "hit": true,
+            "keyPrefix": "61ad29f3bce4",
+            "loadTimeSeconds": 1.069999416358769e-05,
+            "memoryHit": true
+          },
+          "totalCacheReadTimeSeconds": 5.2100003813393414e-05,
+          "totalCacheWriteTimeSeconds": 0.0,
+          "volume-voronoi": {
+            "hit": true,
+            "keyPrefix": "205698e62c8a",
+            "loadTimeSeconds": 1.0799994925037026e-05,
+            "memoryHit": true
+          }
+        },
+        "processWorkingSetBeforeBytes": 200282112,
+        "processWorkingSetAfterBytes": 205860864,
+        "processPeakWorkingSetBytes": 215838720,
+        "meshVertexCount": 4398,
+        "meshTriangleCount": 8884,
+        "volumeMm3": 37.962023175889684,
+        "watertight": true,
+        "edgeManifold": true,
+        "stlSha256": "18b09e7a6cf839a1431f2e79debd2fc7dbae45b1a04235d8491bd0d9038e0888"
+      },
+      "repeatedRamSessionRun": {
+        "totalTimeSeconds": 14.394083000006503,
+        "phaseMetrics": {
+          "target-start": {
+            "targetIndex": 1,
+            "targetCount": 1,
+            "targetDensityPercent": 8.0,
+            "memory": {
+              "processWorkingSetBytes": 205836288,
+              "processPeakWorkingSetBytes": 215838720,
+              "pythonTrackedCurrentBytes": 1731771,
+              "pythonTrackedPeakBytes": 1732754,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "preparing-density-solver": {
+            "memory": {
+              "processWorkingSetBytes": 205836288,
+              "processPeakWorkingSetBytes": 215838720,
+              "pythonTrackedCurrentBytes": 1738153,
+              "pythonTrackedPeakBytes": 1739034,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "iteration-start": {
+            "iteration": 2,
+            "scale": 3.0,
+            "quality": "preview",
+            "memory": {
+              "processWorkingSetBytes": 204521472,
+              "processPeakWorkingSetBytes": 216309760,
+              "pythonTrackedCurrentBytes": 1763772,
+              "pythonTrackedPeakBytes": 13324320,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "job-start": {
+            "memory": {
+              "processWorkingSetBytes": 204521472,
+              "processPeakWorkingSetBytes": 216309760,
+              "pythonTrackedCurrentBytes": 1824501,
+              "pythonTrackedPeakBytes": 13324320,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "reading-input": {
+            "memory": {
+              "processWorkingSetBytes": 204521472,
+              "processPeakWorkingSetBytes": 216309760,
+              "pythonTrackedCurrentBytes": 1831695,
+              "pythonTrackedPeakBytes": 13324320,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "loading-memory-session": {
+            "memoryCacheHit": true,
+            "memory": {
+              "processWorkingSetBytes": 204521472,
+              "processPeakWorkingSetBytes": 216309760,
+              "pythonTrackedCurrentBytes": 1838526,
+              "pythonTrackedPeakBytes": 13324320,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "computing-voronoi": {
+            "memory": {
+              "processWorkingSetBytes": 204521472,
+              "processPeakWorkingSetBytes": 216309760,
+              "pythonTrackedCurrentBytes": 1846604,
+              "pythonTrackedPeakBytes": 13324320,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "exporting-files": {
+            "memory": {
+              "processWorkingSetBytes": 207454208,
+              "processPeakWorkingSetBytes": 217092096,
+              "pythonTrackedCurrentBytes": 1951709,
+              "pythonTrackedPeakBytes": 15970819,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "result-ready": {
+            "memory": {
+              "processWorkingSetBytes": 207441920,
+              "processPeakWorkingSetBytes": 217092096,
+              "pythonTrackedCurrentBytes": 1937220,
+              "pythonTrackedPeakBytes": 15970819,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "iteration-result": {
+            "iteration": 2,
+            "scale": 3.0,
+            "quality": "preview",
+            "achievedDensityPercent": 68.01977683098677,
+            "cacheHit": true,
+            "memory": {
+              "processWorkingSetBytes": 207450112,
+              "processPeakWorkingSetBytes": 217092096,
+              "pythonTrackedCurrentBytes": 1924882,
+              "pythonTrackedPeakBytes": 15970819,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          }
+        },
+        "ramSession": {
+          "createdNewSession": false,
+          "domainReused": false,
+          "hit": true,
+          "locatorReused": false,
+          "sessionKeyPrefix": "0a13132b7d11",
+          "topologyReused": true
+        },
+        "diskCache": {
+          "clipped-interior": {
+            "hit": true,
+            "keyPrefix": "0b5394450abd",
+            "loadTimeSeconds": 1.1000010999850929e-05,
+            "memoryHit": true
+          },
+          "enabled": true,
+          "final-mesh": {
+            "hit": true,
+            "keyPrefix": "f6f76df8b414",
+            "loadTimeSeconds": 1.960000372491777e-05,
+            "memoryHit": true
+          },
+          "hitCount": 4,
+          "missCount": 0,
+          "seeds": {
+            "hit": true,
+            "keyPrefix": "61ad29f3bce4",
+            "loadTimeSeconds": 1.069999416358769e-05,
+            "memoryHit": true
+          },
+          "totalCacheReadTimeSeconds": 5.2100003813393414e-05,
+          "totalCacheWriteTimeSeconds": 0.0,
+          "volume-voronoi": {
+            "hit": true,
+            "keyPrefix": "205698e62c8a",
+            "loadTimeSeconds": 1.0799994925037026e-05,
+            "memoryHit": true
+          }
+        },
+        "processWorkingSetBeforeBytes": 205803520,
+        "processWorkingSetAfterBytes": 207982592,
+        "processPeakWorkingSetBytes": 217092096,
+        "meshVertexCount": 4398,
+        "meshTriangleCount": 8884,
+        "volumeMm3": 37.962023175889684,
+        "watertight": true,
+        "edgeManifold": true,
+        "stlSha256": "18b09e7a6cf839a1431f2e79debd2fc7dbae45b1a04235d8491bd0d9038e0888"
+      }
+    },
+    "density-batch": {
+      "firstPersistentRun": {
+        "totalTimeSeconds": 15.03805819999252,
+        "phaseMetrics": {
+          "target-start": {
+            "targetIndex": 2,
+            "targetCount": 2,
+            "targetDensityPercent": 8.0,
+            "memory": {
+              "processWorkingSetBytes": 207601664,
+              "processPeakWorkingSetBytes": 218398720,
+              "pythonTrackedCurrentBytes": 2068839,
+              "pythonTrackedPeakBytes": 16188599,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "preparing-density-solver": {
+            "memory": {
+              "processWorkingSetBytes": 207601664,
+              "processPeakWorkingSetBytes": 218398720,
+              "pythonTrackedCurrentBytes": 2075923,
+              "pythonTrackedPeakBytes": 16188599,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "iteration-start": {
+            "iteration": 2,
+            "scale": 3.0,
+            "quality": "preview",
+            "memory": {
+              "processWorkingSetBytes": 205766656,
+              "processPeakWorkingSetBytes": 218398720,
+              "pythonTrackedCurrentBytes": 1980845,
+              "pythonTrackedPeakBytes": 13541606,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "job-start": {
+            "memory": {
+              "processWorkingSetBytes": 205766656,
+              "processPeakWorkingSetBytes": 218398720,
+              "pythonTrackedCurrentBytes": 2041380,
+              "pythonTrackedPeakBytes": 13541606,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "reading-input": {
+            "memory": {
+              "processWorkingSetBytes": 205766656,
+              "processPeakWorkingSetBytes": 218398720,
+              "pythonTrackedCurrentBytes": 2048714,
+              "pythonTrackedPeakBytes": 13541606,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "loading-memory-session": {
+            "memoryCacheHit": true,
+            "memory": {
+              "processWorkingSetBytes": 205766656,
+              "processPeakWorkingSetBytes": 218398720,
+              "pythonTrackedCurrentBytes": 2055492,
+              "pythonTrackedPeakBytes": 13541606,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "computing-voronoi": {
+            "memory": {
+              "processWorkingSetBytes": 205766656,
+              "processPeakWorkingSetBytes": 218398720,
+              "pythonTrackedCurrentBytes": 2063691,
+              "pythonTrackedPeakBytes": 13541606,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "exporting-files": {
+            "memory": {
+              "processWorkingSetBytes": 207601664,
+              "processPeakWorkingSetBytes": 218398720,
+              "pythonTrackedCurrentBytes": 2090018,
+              "pythonTrackedPeakBytes": 16188599,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "result-ready": {
+            "memory": {
+              "processWorkingSetBytes": 207773696,
+              "processPeakWorkingSetBytes": 218398720,
+              "pythonTrackedCurrentBytes": 2115873,
+              "pythonTrackedPeakBytes": 16188599,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "iteration-result": {
+            "iteration": 2,
+            "scale": 3.0,
+            "quality": "preview",
+            "achievedDensityPercent": 68.01977683098677,
+            "cacheHit": true,
+            "memory": {
+              "processWorkingSetBytes": 207122432,
+              "processPeakWorkingSetBytes": 218398720,
+              "pythonTrackedCurrentBytes": 2043254,
+              "pythonTrackedPeakBytes": 16188599,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "creating-zip": {
+            "memory": {
+              "processWorkingSetBytes": 207605760,
+              "processPeakWorkingSetBytes": 218398720,
+              "pythonTrackedCurrentBytes": 2098163,
+              "pythonTrackedPeakBytes": 16188599,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          }
+        },
+        "ramSession": {
+          "createdNewSession": false,
+          "domainReused": false,
+          "hit": true,
+          "locatorReused": false,
+          "sessionKeyPrefix": "0a13132b7d11",
+          "topologyReused": true
+        },
+        "diskCache": {
+          "clipped-interior": {
+            "hit": true,
+            "keyPrefix": "0b5394450abd",
+            "loadTimeSeconds": 1.1000010999850929e-05,
+            "memoryHit": true
+          },
+          "enabled": true,
+          "final-mesh": {
+            "hit": true,
+            "keyPrefix": "f6f76df8b414",
+            "loadTimeSeconds": 1.960000372491777e-05,
+            "memoryHit": true
+          },
+          "hitCount": 4,
+          "missCount": 0,
+          "seeds": {
+            "hit": true,
+            "keyPrefix": "61ad29f3bce4",
+            "loadTimeSeconds": 1.069999416358769e-05,
+            "memoryHit": true
+          },
+          "totalCacheReadTimeSeconds": 5.2100003813393414e-05,
+          "totalCacheWriteTimeSeconds": 0.0,
+          "volume-voronoi": {
+            "hit": true,
+            "keyPrefix": "205698e62c8a",
+            "loadTimeSeconds": 1.0799994925037026e-05,
+            "memoryHit": true
+          }
+        },
+        "processWorkingSetBeforeBytes": 207925248,
+        "processWorkingSetAfterBytes": 207777792,
+        "processPeakWorkingSetBytes": 218398720,
+        "meshVertexCount": 4398,
+        "meshTriangleCount": 8884,
+        "volumeMm3": 37.962023175889684,
+        "watertight": true,
+        "edgeManifold": true,
+        "stlSha256": "18b09e7a6cf839a1431f2e79debd2fc7dbae45b1a04235d8491bd0d9038e0888"
+      },
+      "repeatedRamSessionRun": {
+        "totalTimeSeconds": 15.015662800011341,
+        "phaseMetrics": {
+          "target-start": {
+            "targetIndex": 2,
+            "targetCount": 2,
+            "targetDensityPercent": 8.0,
+            "memory": {
+              "processWorkingSetBytes": 207978496,
+              "processPeakWorkingSetBytes": 218546176,
+              "pythonTrackedCurrentBytes": 2295403,
+              "pythonTrackedPeakBytes": 16316529,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "preparing-density-solver": {
+            "memory": {
+              "processWorkingSetBytes": 207978496,
+              "processPeakWorkingSetBytes": 218546176,
+              "pythonTrackedCurrentBytes": 2302537,
+              "pythonTrackedPeakBytes": 16316529,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "iteration-start": {
+            "iteration": 2,
+            "scale": 3.0,
+            "quality": "preview",
+            "memory": {
+              "processWorkingSetBytes": 206036992,
+              "processPeakWorkingSetBytes": 218398720,
+              "pythonTrackedCurrentBytes": 2268325,
+              "pythonTrackedPeakBytes": 13833617,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "job-start": {
+            "memory": {
+              "processWorkingSetBytes": 206036992,
+              "processPeakWorkingSetBytes": 218398720,
+              "pythonTrackedCurrentBytes": 2327311,
+              "pythonTrackedPeakBytes": 13833617,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "reading-input": {
+            "memory": {
+              "processWorkingSetBytes": 206036992,
+              "processPeakWorkingSetBytes": 218398720,
+              "pythonTrackedCurrentBytes": 2334583,
+              "pythonTrackedPeakBytes": 13833617,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "loading-memory-session": {
+            "memoryCacheHit": true,
+            "memory": {
+              "processWorkingSetBytes": 206036992,
+              "processPeakWorkingSetBytes": 218398720,
+              "pythonTrackedCurrentBytes": 2341360,
+              "pythonTrackedPeakBytes": 13833617,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "computing-voronoi": {
+            "memory": {
+              "processWorkingSetBytes": 206036992,
+              "processPeakWorkingSetBytes": 218398720,
+              "pythonTrackedCurrentBytes": 2349402,
+              "pythonTrackedPeakBytes": 13833617,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "exporting-files": {
+            "memory": {
+              "processWorkingSetBytes": 207978496,
+              "processPeakWorkingSetBytes": 218546176,
+              "pythonTrackedCurrentBytes": 2316886,
+              "pythonTrackedPeakBytes": 16316529,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "result-ready": {
+            "memory": {
+              "processWorkingSetBytes": 208187392,
+              "processPeakWorkingSetBytes": 218546176,
+              "pythonTrackedCurrentBytes": 2336648,
+              "pythonTrackedPeakBytes": 16316529,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "iteration-result": {
+            "iteration": 2,
+            "scale": 3.0,
+            "quality": "preview",
+            "achievedDensityPercent": 68.01977683098677,
+            "cacheHit": true,
+            "memory": {
+              "processWorkingSetBytes": 207478784,
+              "processPeakWorkingSetBytes": 218546176,
+              "pythonTrackedCurrentBytes": 2269506,
+              "pythonTrackedPeakBytes": 16316529,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          },
+          "creating-zip": {
+            "memory": {
+              "processWorkingSetBytes": 207978496,
+              "processPeakWorkingSetBytes": 218546176,
+              "pythonTrackedCurrentBytes": 2325240,
+              "pythonTrackedPeakBytes": 16316529,
+              "estimatedNumpyBytes": 0,
+              "estimatedVoxelFieldBytes": 0,
+              "estimatedSessionCacheBytes": 2033919
+            }
+          }
+        },
+        "ramSession": {
+          "createdNewSession": false,
+          "domainReused": false,
+          "hit": true,
+          "locatorReused": false,
+          "sessionKeyPrefix": "0a13132b7d11",
+          "topologyReused": true
+        },
+        "diskCache": {
+          "clipped-interior": {
+            "hit": true,
+            "keyPrefix": "0b5394450abd",
+            "loadTimeSeconds": 1.1000010999850929e-05,
+            "memoryHit": true
+          },
+          "enabled": true,
+          "final-mesh": {
+            "hit": true,
+            "keyPrefix": "f6f76df8b414",
+            "loadTimeSeconds": 1.960000372491777e-05,
+            "memoryHit": true
+          },
+          "hitCount": 4,
+          "missCount": 0,
+          "seeds": {
+            "hit": true,
+            "keyPrefix": "61ad29f3bce4",
+            "loadTimeSeconds": 1.069999416358769e-05,
+            "memoryHit": true
+          },
+          "totalCacheReadTimeSeconds": 5.2100003813393414e-05,
+          "totalCacheWriteTimeSeconds": 0.0,
+          "volume-voronoi": {
+            "hit": true,
+            "keyPrefix": "205698e62c8a",
+            "loadTimeSeconds": 1.0799994925037026e-05,
+            "memoryHit": true
+          }
+        },
+        "processWorkingSetBeforeBytes": 207720448,
+        "processWorkingSetAfterBytes": 208191488,
+        "processPeakWorkingSetBytes": 218546176,
+        "meshVertexCount": 4398,
+        "meshTriangleCount": 8884,
+        "volumeMm3": 37.962023175889684,
+        "watertight": true,
+        "edgeManifold": true,
+        "stlSha256": "18b09e7a6cf839a1431f2e79debd2fc7dbae45b1a04235d8491bd0d9038e0888"
+      }
+    }
+  },
+  "worker": {
+    "pid": 52668,
+    "versions": {
+      "python": "3.13.0",
+      "numpy": "2.5.1",
+      "scipy": "1.18.0",
+      "pyvista": "0.48.4",
+      "vtk": "9.6.2"
+    }
+  }
+}

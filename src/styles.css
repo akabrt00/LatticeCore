@@ -259,6 +259,24 @@ input[type="range"] {
   accent-color: var(--accent);
 }
 
+.controls input[type="number"] {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.controls input[type="number"]:disabled {
+  opacity: 0.58;
+}
+
+#mesh-engine-note {
+  margin-top: 12px;
+  color: var(--muted);
+}
+
 #align-build-plate {
   width: 100%;
   margin-top: 14px;
@@ -270,7 +288,8 @@ input[type="range"] {
   gap: 8px;
 }
 
-.actions #export {
+.actions #export,
+.actions #export-metadata {
   grid-column: 1 / -1;
 }
 
@@ -340,6 +359,233 @@ input[type="range"] {
 
 .warning-panel h2 {
   color: var(--warning);
+}
+
+#mesh-validation-panel.invalid {
+  border-color: rgba(255, 91, 111, 0.58);
+}
+
+#validation-warning {
+  margin-top: 12px;
+  color: #ff8b9b;
+  font-weight: 650;
+}
+
+.error-text {
+  color: #ff8b9b !important;
+  font-weight: 650;
+}
+
+.unit-warning {
+  margin: 10px 0 0;
+  color: var(--muted);
+}
+
+#import-controls {
+  margin-top: 12px;
+}
+
+.conformal-settings {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.conformal-settings h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+
+#conformal-parameters {
+  display: grid;
+  gap: 12px;
+}
+
+#conformal-parameters[hidden] {
+  display: none;
+}
+
+#conformal-parameters p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.compact-stats {
+  display: grid;
+  grid-template-columns: minmax(72px, auto) minmax(0, 1fr);
+  gap: 6px 10px;
+  margin: 12px 0 0;
+  font-size: 12px;
+}
+
+.compact-stats dt {
+  color: var(--muted);
+}
+
+.compact-stats dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.preview-visibility {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.preview-visibility[hidden] {
+  display: none;
+}
+
+.preview-visibility .toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.debug-layer-list,
+.debug-actions,
+.cache-actions {
+  display: grid;
+  gap: 7px;
+}
+
+#job-progress {
+  width: 100%;
+  height: 8px;
+  margin: 10px 0;
+  accent-color: #52cfc4;
+}
+
+.job-messages {
+  max-height: 112px;
+  margin: 8px 0 12px;
+  padding-left: 20px;
+  overflow: auto;
+  color: #aebbc4;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.job-messages li + li {
+  margin-top: 4px;
+}
+
+.job-stats dd {
+  overflow-wrap: anywhere;
+}
+
+.debug-layer-list {
+  margin-top: 10px;
+}
+
+.debug-layer-list label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.debug-layer-list small {
+  display: block;
+  color: var(--muted);
+}
+
+.debug-actions {
+  grid-template-columns: 1fr 1fr;
+}
+
+.debug-actions button,
+.cache-actions button {
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface-2);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.cache-actions {
+  margin-top: 10px;
+}
+
+.panel-note {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 11px !important;
+}
+
+#density-solver-controls {
+  display: grid;
+  gap: 12px;
+}
+
+#density-solver-controls[hidden] {
+  display: none;
+}
+
+#density-batch-controls[hidden],
+#density-single-controls[hidden],
+#density-batch-results-panel[hidden] {
+  display: none;
+}
+
+#density-batch-validation {
+  color: #8fa3ad;
+  font-size: 0.76rem;
+  line-height: 1.35;
+  margin: 0 0 10px;
+}
+
+#density-batch-validation.invalid {
+  color: #f28b82;
+}
+
+#density-chart {
+  width: 100%;
+  height: 120px;
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  background: #10161c;
+}
+
+.density-table-wrap {
+  margin-top: 10px;
+  overflow: auto;
+}
+
+#density-iteration-table,
+#density-batch-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+#density-iteration-table th,
+#density-iteration-table td,
+#density-batch-table th,
+#density-batch-table td {
+  padding: 5px 4px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+}
+
+#density-iteration-table th:first-child,
+#density-iteration-table td:first-child {
+  text-align: left;
+}
+
+#density-batch-table th,
+#density-batch-table td {
+  white-space: nowrap;
+}
+
+#density-batch-table a {
+  color: #62d1c5;
 }
 
 .panel p {

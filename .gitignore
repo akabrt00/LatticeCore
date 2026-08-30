@@ -1,15 +1,23 @@
 stl-structure-lab-screenshot.png
 latticecore-screenshot.png
 latticecore-*.png
+/latticecore.js
 
 node_modules/
 dist/
 
 .venv/
+.pytest_cache/
+.mypy_cache/
 __pycache__/
 *.py[cod]
 
 exports/
+cache/
+job-storage/
+result-storage/
+benchmarks/tmp/
+*.log
 *.stl
 *.obj
 

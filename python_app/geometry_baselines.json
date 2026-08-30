@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "vtkReferenceVersion": "9.6.2",
+  "parametricBoxPreview": {
+    "arguments": {
+      "sizeMm": [6.0, 6.0, 6.0],
+      "seedCount": 8,
+      "randomSeed": 4242,
+      "tubeRadiusMm": 0.5,
+      "minimumStrutLengthMm": 0.4
+    },
+    "expected": {
+      "seedCount": 8,
+      "strutGraphCount": 82,
+      "boundsMin": [-3.0, -3.0, -3.0],
+      "boundsMax": [3.0, 3.0, 3.0],
+      "meshVertexCount": 5420,
+      "meshTriangleCount": 10988,
+      "volumeMm3": 54.8312588378917,
+      "boundaryEdgeCount": 0,
+      "nonManifoldEdgeCount": 0,
+      "componentCount": 1,
+      "watertight": true,
+      "edgeManifold": true
+    },
+    "tolerances": {
+      "meshCountRelative": 0.15,
+      "volumeRelative": 0.08,
+      "boundsAbsoluteMm": 0.02
+    }
+  }
+}

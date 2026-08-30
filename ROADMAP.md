@@ -1,83 +1,50 @@
 # LatticeCore roadmap
 
-Roadmapa je rozdelená tak, aby byl projekt pouzitelný jako bakalárská práce
-a soucasne zustal realisticky dokoncitelný.
+## Dokončeno
 
-## Etapa 1: Lokální základ aplikace
+- lokální Three.js aplikace s importem STL a OBJ,
+- parametrická kostka a válec,
+- 3D Voronoi 1-skeleton a ořez podle boxu i obecného uzavřeného meshe,
+- povrchově konformní Voronoi síť,
+- connectory mezi povrchem a vnitřkem,
+- filtrace krátkých prutů a slučování blízkých uzlů,
+- implicitní watertight union a validace výsledného meshe,
+- persistentní Python worker, FIFO fronta, SSE, zrušení a zotavení po pádu,
+- disková a paměťová cache,
+- solver relativní hustoty a dávkové exporty,
+- diagnostické vrstvy a experimentální kontrola tisknutelnosti,
+- clean-room testy, bezpečnostní audit a dokumentace architektury.
 
-Stav: první verze hotová.
+## Aktuální priorita
 
-- Lokální spustení bez online backendu.
-- Import STL.
-- 3D náhled modelu.
-- Orbit kamera.
-- Základní statistiky modelu.
-- Export STL.
-- Základní README a rešerše.
+1. Ověřit tisknutelnost referenční kostky a několika obecných STL ve sliceru.
+2. Porovnat geometrické parametry exportu s reálně vytištěnými vzorky.
+3. Změřit čas výpočtu, spotřebu paměti, výslednou hustotu a odchylku rozměrů.
+4. Stabilizovat automatické doplňování samonosných prutů podle vrstev.
+5. Připravit reprodukovatelnou sadu parametrů a vzorků pro bakalářskou práci.
 
-## Etapa 2: Voronoi povrchová síť
+## Následující vývoj
 
-Stav: první prototyp hotový, potrebuje ladit kvalitu výstupu.
+### Geometrická robustnost
 
-- Povrchová Voronoi/lattice síť bez destruktivní deformace původního STL.
-- Parametry: počet buněk, odsazení povrchu, průměr prutů, spojování hran,
-  náhodnost buněk.
-- Export samostatné povrchové lattice geometrie.
-- Otestování výstupu ve sliceru.
-- Dalsí vzory jako hex/gyroid neřešit, dokud nebude Voronoi režim stabilní.
+- adaptivní hustota seedů podle lokální tloušťky a zakřivení,
+- robustnější napojování povrchu na objem u tenkých a konkávních oblastí,
+- rychlejší prostorový index pro velké importované modely,
+- volitelná oprava drobných děr a non-manifold vstupů s jasným reportem změn.
 
-## Etapa 3: Voronoi objemový lattice pro jednoduché tvary
+### 3D tisk
 
-Stav: prototyp trubickové lattice kostry hotový.
+- validace po vrstvách nad finální exportní geometrií,
+- lepší hledání kotev podpůrných prutů a iterativní kontrola po opravě,
+- profily pro FDM a SLA/MSLA,
+- export orientace a parametrů pro dokumentaci experimentu.
 
-- Kostka a kvádr jako hlavní testovací modely.
-- Voronoi-like prostorová struktura ze seed bodů.
-- Rychlý tvarový odhad pro válec a kvádr, aby se lattice nevytvářel jen jako
-  bounding box.
-- Parametry počtu buněk, spojování hran a průměru prutů.
-- Export objemové lattice struktury do STL.
-- Otestování exportu ve sliceru.
-- Zhodnocení tisknutelnosti.
+### Výzkumné vyhodnocení
 
-## Etapa 4: Skutečná Voronoi tessellace a ořez podle STL
+- sada referenčních těles a verzovaných baseline,
+- automatizované tabulky hustoty, hmotnosti a doby výpočtu,
+- porovnání simulované a naměřené mechanické odezvy,
+- dokumentované limity Voronoi aproximace na povrchu.
 
-Stav: plánovaná výzkumná cást.
-
-- Vytvoření Voronoi tessellace v bounding boxu modelu.
-- Detekce bodů, hran a strutů uvnitř STL.
-- Odstranění částí mimo model.
-- Napojení vnitřní lattice na povrchovou Voronoi síť.
-- Vyhodnocení robustnosti na jednoduchých i slozitejsích STL.
-
-## Etapa 5: Robustnost a vyhodnocení
-
-Stav: plánováno.
-
-- Testovací sada STL modelu.
-- Pocet trojúhelníku pred a po úprave.
-- Velikost exportovaných souboru.
-- Cas generování.
-- Kontrola vodotesnosti a tisknutelnosti.
-- Screenshoty z aplikace a sliceru.
-- Popis omezení algoritmu.
-
-## Etapa 6: Dokoncení pro bakalárskou práci
-
-Stav: plánováno.
-
-- Offline knihovny místo CDN.
-- Stabilizace UI.
-- Ukázkové modely.
-- Kapitola návrhu aplikace.
-- Kapitola implementace algoritmu.
-- Kapitola testování.
-- Záver, omezení a moznosti rozsírení.
-
-## Nejblizsí praktické kroky
-
-1. Soustredit projekt pouze na Voronoi.
-2. Zlepsit povrchovou Voronoi sit podle principu Voronatoru.
-3. Vytvorit izolovany experiment 3D Voronoi v kvadru podle TUL workflow.
-4. Orezat 3D Voronoi hrany podle jednoducheho tvaru: kostka, valec.
-5. Pridat filtr kratkych struts.
-6. Teprve potom ladit obecne STL a slicer test.
+Další typy struktur, například gyroid nebo hexagonální lattice, nejsou prioritou, dokud nebude
+Voronoi pipeline spolehlivě ověřena tiskem a mechanickými zkouškami.
