@@ -2,7 +2,7 @@ name: LatticeCore CI
 
 on:
   push:
-    branches: [master]
+    branches: [main, master]
   pull_request:
 
 concurrency:
