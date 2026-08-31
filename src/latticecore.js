@@ -9,6 +9,10 @@ import {
   describeJobPhase,
   formatJobElapsed,
 } from "./jobPresentation.js";
+import {
+  createClippedVoronoiSegments,
+  generateWellSpacedSeeds,
+} from "./boxSurfaceVoronoi.js";
 
 const viewport = document.querySelector("#viewport");
 const fileInput = document.querySelector("#stl-input");
@@ -870,42 +874,40 @@ function createSurfaceLattice(sourceGeometry) {
   const params = getLatticeParams();
   const radius = getLatticeRadius(bbox);
   const surfaceInset = Math.max(params.surfaceOffset, radius * 1.15);
-  const rawSamples = sampleSurfacePoints(sourceGeometry, getSurfaceLatticeCount(), -surfaceInset);
-  const samples = mergeCloseSamples(rawSamples, getNodeMergeDistance(bbox, radius));
+  let rawNodeCount;
+  let removedNodeCount;
+  let rawEdgeCount;
+  let nodes;
+  let finalEdges;
   if (sourceGeometry.userData?.latticeShape === "box") {
-    const safeMin = bbox.min.clone().addScalar(radius * 1.16);
-    const safeMax = bbox.max.clone().addScalar(-radius * 1.16);
-    samples.forEach((sample) => sample.position.clamp(safeMin, safeMax));
-  }
-  const rawEdges = createSurfaceEdges(samples, bbox);
-  const edges = filterIndexedEdgesByLength(rawEdges, samples.map((sample) => sample.position), getMinimumStrutLength(bbox, radius));
-  const nodes = samples.map((sample) => sample.position.clone());
-  const finalEdges = edges.map(([aIndex, bIndex]) => [aIndex, bIndex]);
-
-  if (sourceGeometry.userData?.latticeShape === "box") {
-    const frameInset = radius * 1.15;
-    const min = bbox.min.clone().addScalar(frameInset);
-    const max = bbox.max.clone().addScalar(-frameInset);
-    const frameOffset = nodes.length;
-    nodes.push(
-      new THREE.Vector3(min.x, min.y, min.z), new THREE.Vector3(max.x, min.y, min.z),
-      new THREE.Vector3(max.x, max.y, min.z), new THREE.Vector3(min.x, max.y, min.z),
-      new THREE.Vector3(min.x, min.y, max.z), new THREE.Vector3(max.x, min.y, max.z),
-      new THREE.Vector3(max.x, max.y, max.z), new THREE.Vector3(min.x, max.y, max.z),
+    const graph = createBoxSurfaceVoronoiGraph(bbox, getSurfaceLatticeCount(), surfaceInset);
+    nodes = graph.nodes;
+    finalEdges = graph.edges;
+    rawNodeCount = graph.seedCount;
+    removedNodeCount = 0;
+    rawEdgeCount = graph.edges.length;
+  } else {
+    const rawSamples = sampleSurfacePoints(sourceGeometry, getSurfaceLatticeCount(), -surfaceInset);
+    const samples = mergeCloseSamples(rawSamples, getNodeMergeDistance(bbox, radius));
+    const rawEdges = createSurfaceEdges(samples, bbox);
+    const edges = filterIndexedEdgesByLength(
+      rawEdges,
+      samples.map((sample) => sample.position),
+      getMinimumStrutLength(bbox, radius),
     );
-    for (const [aIndex, bIndex] of [
-      [0, 1], [1, 2], [2, 3], [3, 0],
-      [4, 5], [5, 6], [6, 7], [7, 4],
-      [0, 4], [1, 5], [2, 6], [3, 7],
-    ]) finalEdges.push([frameOffset + aIndex, frameOffset + bIndex]);
+    nodes = samples.map((sample) => sample.position.clone());
+    finalEdges = edges.map(([aIndex, bIndex]) => [aIndex, bIndex]);
+    rawNodeCount = rawSamples.length;
+    removedNodeCount = rawSamples.length - samples.length;
+    rawEdgeCount = rawEdges.length;
   }
   group.userData.optimization = {
-    rawNodes: rawSamples.length,
-    nodes: samples.length,
-    removedNodes: rawSamples.length - samples.length,
-    rawEdges: rawEdges.length,
+    rawNodes: rawNodeCount,
+    nodes: nodes.length,
+    removedNodes: removedNodeCount,
+    rawEdges: rawEdgeCount,
     edges: finalEdges.length,
-    removedEdges: rawEdges.length - edges.length,
+    removedEdges: rawEdgeCount - finalEdges.length,
   };
   group.userData.latticeNodes = nodes;
   group.userData.latticeEdges = finalEdges;
@@ -922,6 +924,78 @@ function createSurfaceLattice(sourceGeometry) {
   }
 
   return group;
+}
+
+function createBoxSurfaceVoronoiGraph(bbox, requestedSeedCount, requestedInset) {
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  bbox.getSize(size);
+  bbox.getCenter(center);
+  const inset = Math.min(
+    Math.max(requestedInset, 0),
+    Math.min(size.x, size.y, size.z) * 0.22,
+  );
+  const inner = new THREE.Vector3(
+    Math.max(size.x - inset * 2, 1e-3),
+    Math.max(size.y - inset * 2, 1e-3),
+    Math.max(size.z - inset * 2, 1e-3),
+  );
+  const faces = [
+    { width: inner.y, height: inner.z, map: (u, v) => new THREE.Vector3(bbox.min.x + inset, center.y + u, center.z + v) },
+    { width: inner.y, height: inner.z, map: (u, v) => new THREE.Vector3(bbox.max.x - inset, center.y + u, center.z + v) },
+    { width: inner.x, height: inner.z, map: (u, v) => new THREE.Vector3(center.x + u, bbox.min.y + inset, center.z + v) },
+    { width: inner.x, height: inner.z, map: (u, v) => new THREE.Vector3(center.x + u, bbox.max.y - inset, center.z + v) },
+    { width: inner.x, height: inner.y, map: (u, v) => new THREE.Vector3(center.x + u, center.y + v, bbox.min.z + inset) },
+    { width: inner.x, height: inner.y, map: (u, v) => new THREE.Vector3(center.x + u, center.y + v, bbox.max.z - inset) },
+  ];
+  const allocations = allocateFaceSeedCounts(
+    faces.map((face) => face.width * face.height),
+    Math.max(12, Math.round(requestedSeedCount)),
+  );
+  const params = getLatticeParams();
+  const random = mulberry32(6203 + Math.round(params.randomSeed) * 97 + getSeedSalt());
+  const nodes = [];
+  const edges = [];
+  const nodeLookup = new Map();
+  const edgeLookup = new Set();
+  const precision = Math.max(Math.min(inner.x, inner.y, inner.z) * 1e-6, 1e-6);
+  const getNodeIndex = (point) => {
+    const key = `${Math.round(point.x / precision)},${Math.round(point.y / precision)},${Math.round(point.z / precision)}`;
+    if (!nodeLookup.has(key)) {
+      nodeLookup.set(key, nodes.length);
+      nodes.push(point);
+    }
+    return nodeLookup.get(key);
+  };
+
+  faces.forEach((face, faceIndex) => {
+    const seeds = generateWellSpacedSeeds(allocations[faceIndex], face.width, face.height, random);
+    const segments = createClippedVoronoiSegments(seeds, face.width, face.height, precision);
+    for (const [start, end] of segments) {
+      const startIndex = getNodeIndex(face.map(start[0], start[1]));
+      const endIndex = getNodeIndex(face.map(end[0], end[1]));
+      if (startIndex === endIndex) continue;
+      const edgeKey = startIndex < endIndex ? `${startIndex}:${endIndex}` : `${endIndex}:${startIndex}`;
+      if (edgeLookup.has(edgeKey)) continue;
+      edgeLookup.add(edgeKey);
+      edges.push([startIndex, endIndex]);
+    }
+  });
+  return { nodes, edges, seedCount: allocations.reduce((sum, count) => sum + count, 0) };
+}
+
+function allocateFaceSeedCounts(faceAreas, totalCount) {
+  const minimumPerFace = 2;
+  const remaining = Math.max(0, totalCount - faceAreas.length * minimumPerFace);
+  const totalArea = faceAreas.reduce((sum, area) => sum + area, 0) || 1;
+  const exactExtras = faceAreas.map((area) => (area / totalArea) * remaining);
+  const counts = exactExtras.map((value) => minimumPerFace + Math.floor(value));
+  const unassigned = totalCount - counts.reduce((sum, count) => sum + count, 0);
+  const priority = exactExtras
+    .map((value, index) => ({ index, remainder: value - Math.floor(value) }))
+    .sort((left, right) => right.remainder - left.remainder);
+  for (let index = 0; index < unassigned; index += 1) counts[priority[index % priority.length].index] += 1;
+  return counts;
 }
 
 function getLatticeRadius(bbox) {
@@ -2701,7 +2775,8 @@ function findSelfSupportAnchor(center, centerProjection, candidates, normal, min
 function getSeedSalt() {
   const params = getLatticeParams();
   return Math.round(
-    params.cellCount * 19 +
+    params.randomSeed * 43 +
+      params.cellCount * 19 +
       params.edgeReach * 230 +
       params.strutDiameter * 100 +
       params.randomness * 1000
