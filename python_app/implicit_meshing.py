@@ -398,9 +398,23 @@ def generate_implicit_union_mesh(
     if cancellation_token is not None:
         cancellation_token.check()
     field_seconds = perf_counter() - field_started
+    if progress_callback is not None:
+        progress_callback(
+            phase="extracting-surface",
+            message="Extrahuji povrch z implicitního pole.",
+            fraction=0.0,
+            metrics={"totalVoxelCount": plan.total_voxel_count},
+        )
     marching_started = perf_counter()
     mesh, removed_artifacts = marching_cubes_mesh(field, plan)
     marching_seconds = perf_counter() - marching_started
+    if progress_callback is not None:
+        progress_callback(
+            phase="extracting-surface",
+            message="Povrch implicitního meshe je připravený.",
+            fraction=1.0,
+            metrics={"triangleCount": int(mesh.n_cells)},
+        )
     metadata = {
         "enabled": True,
         "voxelSizeMm": float(voxel_size_mm),

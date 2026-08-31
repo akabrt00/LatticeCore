@@ -437,7 +437,12 @@
               <dt>Paměť workeru</dt><dd id="worker-memory">-</dd>
               <dt>Čas / fronta</dt><dd id="job-time">-</dd>
             </dl>
+            <div class="job-progress-copy">
+              <span id="job-progress-label">Čekám na úlohu</span>
+              <span id="job-progress-percent">-</span>
+            </div>
             <progress id="job-progress" max="1" value="0" hidden></progress>
+            <p id="job-hint" class="job-hint">Finální implicitní mesh může u složitých modelů trvat několik minut.</p>
             <ol id="job-messages" class="job-messages"></ol>
             <div class="cache-actions">
               <button id="cancel-job" type="button" disabled>Zrušit výpočet</button>

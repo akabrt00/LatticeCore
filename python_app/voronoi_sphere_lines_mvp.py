@@ -1944,6 +1944,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def map_implicit_progress(phase: str, fraction: float | None) -> float:
+    local_fraction = min(1.0, max(0.0, float(fraction or 0.0)))
+    phase_ranges = {
+        "memory-preflight": (0.48, 0.50),
+        "generating-final-mesh": (0.50, 0.72),
+        "clipping-interior": (0.72, 0.82),
+        "extracting-surface": (0.82, 0.84),
+    }
+    start, end = phase_ranges.get(phase, (0.48, 0.84))
+    return start + (end - start) * local_fraction
+
+
 def main(
     argv: list[str] | None = None,
     runtime_context: WorkerRuntime | None = None,
@@ -2422,6 +2434,16 @@ def main(
         node_mesh = pv.PolyData()
     elif used_mesh_engine == "implicit-union":
         report("generating-final-mesh", "Připravuji implicitní watertight mesh.", 0.48)
+
+        def implicit_progress_callback(*, phase, message, fraction=None, metrics=None):
+            report(
+                phase,
+                message,
+                map_implicit_progress(phase, fraction),
+                **(metrics or {}),
+                phaseFraction=fraction,
+            )
+
         capsules = [
             CapsulePrimitive(np.asarray(start), np.asarray(end), args.tube_radius)
             for start, end in inside_edges + support_edges
@@ -2452,7 +2474,7 @@ def main(
             spheres,
             voxel_size,
             exact_domain_intersection=triangle_domain is not None or args.boundary_mode == "exact",
-            progress_callback=runtime_context.progress_callback if runtime_context is not None else None,
+            progress_callback=implicit_progress_callback if runtime_context is not None else None,
             cancellation_token=cancellation_token,
         )
         tube_mesh = combined_mesh
@@ -2486,9 +2508,11 @@ def main(
             ).clean()
             final_removed_mesh_components = int(len(output_regions) - 1)
 
+    report("validating-final-mesh", "Kontroluji finální geometrii.", 0.85)
     validation_started = perf_counter()
     validation_before = validate_mesh(combined_mesh)
     validation_seconds += perf_counter() - validation_started
+    report("repairing-final-mesh", "Opravuji a čistím exportní mesh.", 0.88)
     cleanup_started = perf_counter()
     export_mesh = repair_mesh_for_export(combined_mesh)
     cleanup_seconds = perf_counter() - cleanup_started
@@ -2497,6 +2521,7 @@ def main(
             "points": np.asarray(export_mesh.points),
             "faces": np.asarray(export_mesh.faces),
         })
+    report("validating-export", "Ověřuji manifoldnost a hranice exportu.", 0.91)
     validation_started = perf_counter()
     validation_after = validate_mesh(export_mesh)
     validation_seconds += perf_counter() - validation_started

@@ -4,6 +4,11 @@ import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { STLExporter } from "three/addons/exporters/STLExporter.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import {
+  buildGenerationFingerprint,
+  describeJobPhase,
+  formatJobElapsed,
+} from "./jobPresentation.js";
 
 const viewport = document.querySelector("#viewport");
 const fileInput = document.querySelector("#stl-input");
@@ -162,6 +167,9 @@ const jobUi = {
   memory: document.querySelector("#worker-memory"),
   time: document.querySelector("#job-time"),
   progress: document.querySelector("#job-progress"),
+  progressLabel: document.querySelector("#job-progress-label"),
+  progressPercent: document.querySelector("#job-progress-percent"),
+  hint: document.querySelector("#job-hint"),
   messages: document.querySelector("#job-messages"),
   cancel: document.querySelector("#cancel-job"),
   clearMemory: document.querySelector("#clear-memory-cache"),
@@ -226,7 +234,12 @@ const state = {
   printOffset: new THREE.Vector3(),
   activeJobId: null,
   activeJobStartedAt: 0,
+  activeJobLastEventAt: 0,
+  activeJobHint: "",
   activeJobEvents: [],
+  workerQueueCount: 0,
+  lastJobElapsedSeconds: 0,
+  lastCompletedGenerationKey: null,
 };
 
 const scene = new THREE.Scene();
@@ -306,6 +319,7 @@ function init() {
   refreshCacheStatus();
   refreshWorkerStatus();
   window.setInterval(refreshWorkerStatus, 5000);
+  window.setInterval(updateActiveJobClock, 1000);
   if (initialOptions.sample === "cylinder") {
     loadSampleCylinder({ generate: false });
   } else {
@@ -607,6 +621,7 @@ function loadStlFile(file) {
 
 function setGeometry(geometry, message, { generate = true } = {}) {
   state.generationId += 1;
+  state.lastCompletedGenerationKey = null;
   state.printOffset.set(0, 0, 0);
   const userData = { ...geometry.userData };
   if (geometry.index) geometry = geometry.toNonIndexed();
@@ -637,6 +652,7 @@ function setGeometry(geometry, message, { generate = true } = {}) {
 function resetGeometry() {
   if (!state.originalGeometry || !state.mesh) return;
   state.generationId += 1;
+  state.lastCompletedGenerationKey = null;
   state.printOffset.set(0, 0, 0);
   state.geometry.dispose();
   state.geometry = state.originalGeometry.clone();
@@ -661,6 +677,12 @@ async function applyStructure() {
     labels.status.textContent = "Jeden výpočet už běží. Počkej na dokončení nebo jej zruš v panelu Výpočetní úloha.";
     return;
   }
+  const generationKey = getGenerationRequestKey();
+  if (generationKey === state.lastCompletedGenerationKey && state.volumeGroup) {
+    labels.status.textContent = "Aktuální výsledek už odpovídá těmto parametrům.";
+    labels.warning.textContent = "Stejný výpočet nebyl spuštěn znovu. Změň parametr nebo model, pokud chceš nový výsledek.";
+    return;
+  }
   state.generationPending = true;
   previewButton.disabled = true;
   const generationId = (state.generationId += 1);
@@ -674,7 +696,7 @@ async function applyStructure() {
     state.mode === "surface"
       ? "Povrchový režim vytváří samostatnou Voronoi lattice síť nad skutečným povrchem modelu."
       : state.uploadedFile
-        ? "Nahraný model používá otevřenou objemovou lattice síť skutečně oříznutou jeho povrchem."
+        ? "Nahraný model používá konformní povrchovou síť spojenou s objemovou výplní uvnitř jeho skutečné obálky."
         : "Objemový režim kombinuje povrchovou Voronoi síť a vnitřní lattice výplň.";
 
   if (generationId !== state.generationId) {
@@ -688,22 +710,30 @@ async function applyStructure() {
     if (state.mode === "surface") {
       state.mesh.visible = true;
       disposeVolumeGroup();
+      const quickSurfaceGroup = createSurfaceLattice(state.originalGeometry);
+      quickSurfaceGroup.name = "LatticeCore quick surface preview";
+      quickSurfaceGroup.userData.isQuickPreview = true;
+      quickSurfaceGroup.userData.previewKind = "surface";
+      state.volumeGroup = quickSurfaceGroup;
+      scene.add(state.volumeGroup);
+      applyPrintTransforms();
       const useServerSurface =
         state.originalGeometry.userData?.latticeShape === "mesh" &&
         state.uploadedStlBuffer &&
         getLatticeParams().meshEngine === "implicit-union";
-      const nextVolumeGroup =
-        useServerSurface
-          ? await createPythonVolumeLattice(state.originalGeometry, { surfaceOnly: true })
-          : createSurfaceLattice(state.originalGeometry);
-      if (generationId !== state.generationId) {
-        disposeGroup(nextVolumeGroup);
-        state.generationPending = false;
-        previewButton.disabled = false;
-        return;
+      if (useServerSurface) {
+        labels.status.textContent = "Pracovní povrchová síť je připravená. Počítám finální konformní mesh...";
+        const nextVolumeGroup = await createPythonVolumeLattice(state.originalGeometry, { surfaceOnly: true });
+        if (generationId !== state.generationId) {
+          disposeGroup(nextVolumeGroup);
+          state.generationPending = false;
+          previewButton.disabled = false;
+          return;
+        }
+        disposeVolumeGroup();
+        state.volumeGroup = nextVolumeGroup;
+        scene.add(state.volumeGroup);
       }
-      state.volumeGroup = nextVolumeGroup;
-      scene.add(state.volumeGroup);
       rebuildPrintSupports();
       applyPrintTransforms();
       labels.warning.textContent =
@@ -714,6 +744,7 @@ async function applyStructure() {
       const quickVolumeGroup = createLegacyVolumeLattice(state.originalGeometry);
       quickVolumeGroup.name = "LatticeCore quick volume preview";
       quickVolumeGroup.userData.isQuickPreview = true;
+      quickVolumeGroup.userData.previewKind = "volume";
       state.volumeGroup = quickVolumeGroup;
       scene.add(state.volumeGroup);
       applyPrintTransforms();
@@ -742,14 +773,17 @@ async function applyStructure() {
   } catch (error) {
     if (generationId !== state.generationId) return;
     console.error(error);
-    disposeVolumeGroup();
+    const preservedQuickPreview = Boolean(state.volumeGroup?.userData.isQuickPreview);
+    if (!preservedQuickPreview) disposeVolumeGroup();
     state.generatedStlBuffer = null;
     if (showOriginalMesh) showOriginalMesh.checked = true;
     state.mesh.visible = true;
     const publicError = formatGenerationError(error);
     labels.status.textContent = publicError.message;
     if (state.uploadedFile) importLabels.validation.textContent = publicError.importStatus;
-    labels.warning.textContent = "Lattice nevznikla. Původní model zůstává zobrazený beze změny.";
+    labels.warning.textContent = preservedQuickPreview
+      ? "Finální výpočet se nepodařil. Pracovní lattice náhled zůstává zobrazený, ale není finálním exportním meshem."
+      : "Lattice nevznikla. Původní model zůstává zobrazený beze změny.";
     updatePreviewVisibility();
     updateStats();
     state.generationPending = false;
@@ -761,10 +795,13 @@ async function applyStructure() {
   state.geometry.computeBoundingBox();
   state.mesh.geometry = state.geometry;
   updateStats();
+  state.lastCompletedGenerationKey = generationKey;
   labels.warning.textContent = state.volumeGroup?.userData.isQuickPreview
-    ? state.uploadedFile
-      ? "Povrchová a vnitřní síť kopíruje nahraný model. Rychlý STL export je připravený."
-      : "Výsledek obsahuje povrchovou i vnitřní Voronoi síť. Rychlý STL export je připravený."
+    ? state.volumeGroup.userData.previewKind === "surface"
+      ? "Pracovní povrchová Voronoi síť je hotová. Pro finální watertight STL použij implicitní výpočet."
+      : state.uploadedFile
+        ? "Povrchová a vnitřní síť kopíruje nahraný model. Rychlý STL export je připravený."
+        : "Výsledek obsahuje povrchovou i vnitřní Voronoi síť. Rychlý STL export je připravený."
     : formatOptimizationSummary(state.volumeGroup?.userData.optimization);
   if (state.uploadedFile && state.volumeGroup?.userData.isQuickPreview) {
     importLabels.validation.textContent = "Pracovní náhled hotový";
@@ -913,6 +950,36 @@ function getLatticeParams() {
     edgeReach: Number(controlsConfig.density.value),
     randomness: Number(controlsConfig.smooth.value),
   };
+}
+
+function getGenerationRequestKey() {
+  const ignoredControlIds = new Set([
+    "show-original-mesh",
+    "show-final-mesh",
+    "memory-cache-scope",
+    "stl-input",
+  ]);
+  const controls = Object.fromEntries(
+    [...document.querySelectorAll("input[id], select[id]")]
+      .filter((element) => !ignoredControlIds.has(element.id))
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((element) => [
+        element.id,
+        element.type === "checkbox" ? element.checked : element.value,
+      ]),
+  );
+  const model = state.uploadedFile
+    ? {
+        kind: "upload",
+        name: state.uploadedFile.name,
+        size: state.uploadedFile.size,
+        lastModified: state.uploadedFile.lastModified,
+      }
+    : {
+        kind: state.originalGeometry?.userData?.latticeShape ?? "unknown",
+        vertices: state.originalGeometry?.attributes?.position?.count ?? 0,
+      };
+  return buildGenerationFingerprint({ controls, mode: state.mode, model });
 }
 
 function getSurfaceLatticeCount() {
@@ -1763,6 +1830,7 @@ async function refreshWorkerStatus() {
     return;
   }
   const status = await response.json();
+  state.workerQueueCount = status.queuedJobCount ?? 0;
   const delayed = ["heartbeat-delayed", "busy-native-operation"].includes(status.responsiveness);
   jobUi.worker.textContent = `${status.status}${status.workerPid ? ` · PID ${status.workerPid}` : ""}${delayed ? " · heartbeat čeká" : ""}`;
   const workingSet = status.memory?.processWorkingSetBytes;
@@ -1770,14 +1838,32 @@ async function refreshWorkerStatus() {
   jobUi.memory.textContent = workingSet == null
     ? "nedostupná"
     : `${(workingSet / 1024 ** 2).toFixed(0)} MiB${peak == null ? "" : ` · peak ${(peak / 1024 ** 2).toFixed(0)} MiB`}`;
-  const elapsed = state.activeJobStartedAt ? (performance.now() - state.activeJobStartedAt) / 1000 : 0;
-  jobUi.time.textContent = `${elapsed.toFixed(1)} s · fronta ${status.queuedJobCount ?? 0}`;
+  updateActiveJobClock();
+}
+
+function updateActiveJobClock() {
+  const active = Boolean(state.activeJobId && state.activeJobStartedAt);
+  const elapsed = active
+    ? (performance.now() - state.activeJobStartedAt) / 1000
+    : state.lastJobElapsedSeconds;
+  jobUi.time.textContent = `${formatJobElapsed(elapsed)} · fronta ${state.workerQueueCount}`;
+  if (!active) return;
+  const quietSeconds = state.activeJobLastEventAt
+    ? (performance.now() - state.activeJobLastEventAt) / 1000
+    : 0;
+  jobUi.hint.textContent = quietSeconds > 20
+    ? `${state.activeJobHint} Worker stále počítá; poslední zpráva před ${formatJobElapsed(quietSeconds)}.`
+    : state.activeJobHint;
 }
 
 function updateJobPanel(event) {
   const metrics = event.metrics ?? {};
   if (event.status) jobUi.status.textContent = event.status;
-  if (event.phase) jobUi.phase.textContent = event.phase;
+  if (event.phase) {
+    const phaseLabel = describeJobPhase(event.phase);
+    jobUi.phase.textContent = phaseLabel;
+    jobUi.progressLabel.textContent = phaseLabel;
+  }
   if (metrics.targetIndex != null || event.targetIndex != null) {
     const index = metrics.targetIndex ?? event.targetIndex;
     const count = metrics.targetCount ?? event.targetCount ?? "?";
@@ -1795,9 +1881,12 @@ function updateJobPanel(event) {
   if (cacheHit != null) jobUi.cache.textContent = cacheHit ? "hit" : "miss";
   if (Number.isFinite(event.fraction)) {
     jobUi.progress.hidden = false;
-    jobUi.progress.value = Math.min(1, Math.max(0, event.fraction));
+    const fraction = Math.min(1, Math.max(0, event.fraction));
+    jobUi.progress.value = fraction;
+    jobUi.progressPercent.textContent = `${Math.round(fraction * 100)} %`;
   }
   if (event.message) {
+    state.activeJobLastEventAt = performance.now();
     state.activeJobEvents.push(event.message);
     state.activeJobEvents = state.activeJobEvents.slice(-8);
     jobUi.messages.replaceChildren(...state.activeJobEvents.map((message) => {
@@ -1829,29 +1918,56 @@ async function createAndWaitForJob(query, uploadBody) {
   const created = await response.json();
   state.activeJobId = created.jobId;
   state.activeJobStartedAt = performance.now();
+  state.activeJobLastEventAt = performance.now();
+  state.activeJobHint = query.get("meshEngine") === "implicit-union"
+    ? "Finální implicitní mesh může u složitých modelů trvat několik minut. Pracovní náhled zůstává zobrazený."
+    : "Výpočet probíhá na lokálním Python workeru.";
   state.activeJobEvents = [];
+  state.lastJobElapsedSeconds = 0;
   jobUi.status.textContent = created.status;
   jobUi.cancel.disabled = false;
   jobUi.progress.hidden = true;
+  jobUi.progressLabel.textContent = "Čekání na první fázi";
+  jobUi.progressPercent.textContent = "-";
+  jobUi.hint.textContent = state.activeJobHint;
   await refreshWorkerStatus();
   return new Promise((resolve, reject) => {
     const stream = new EventSource(`/api/lattice-jobs/${encodeURIComponent(created.jobId)}/events`);
     let settled = false;
-    const finish = async () => {
-      if (settled) return;
-      const resultResponse = await fetch(`/api/lattice-jobs/${encodeURIComponent(created.jobId)}`, { cache: "no-store" });
-      const job = await resultResponse.json();
-      updateJobPanel(job.latestEvent ?? job);
-      if (!["completed", "failed", "cancelled", "worker-lost"].includes(job.status)) return;
-      settled = true;
+    let checking = false;
+    let pollTimer = null;
+    const cleanup = () => {
       stream.close();
-      state.activeJobId = null;
-      state.activeJobStartedAt = 0;
-      jobUi.cancel.disabled = true;
-      jobUi.status.textContent = job.status;
-      if (job.status === "completed") resolve(job);
-      else reject(new Error(job.error?.message ?? (job.status === "cancelled" ? "Výpočet byl zrušen." : "Výpočet selhal.")));
+      if (pollTimer != null) window.clearInterval(pollTimer);
     };
+    const finish = async () => {
+      if (settled || checking) return;
+      checking = true;
+      try {
+        const resultResponse = await fetch(`/api/lattice-jobs/${encodeURIComponent(created.jobId)}`, { cache: "no-store" });
+        if (!resultResponse.ok) return;
+        const job = await resultResponse.json();
+        updateJobPanel(job.latestEvent ?? job);
+        if (!["completed", "failed", "cancelled", "worker-lost"].includes(job.status)) return;
+        settled = true;
+        cleanup();
+        state.lastJobElapsedSeconds = (performance.now() - state.activeJobStartedAt) / 1000;
+        state.activeJobId = null;
+        state.activeJobStartedAt = 0;
+        state.activeJobLastEventAt = 0;
+        jobUi.cancel.disabled = true;
+        jobUi.status.textContent = job.status;
+        jobUi.hint.textContent = job.status === "completed"
+          ? `Dokončeno za ${formatJobElapsed(state.lastJobElapsedSeconds)}.`
+          : `Úloha skončila stavem ${job.status}.`;
+        updateActiveJobClock();
+        if (job.status === "completed") resolve(job);
+        else reject(new Error(job.error?.message ?? (job.status === "cancelled" ? "Výpočet byl zrušen." : "Výpočet selhal.")));
+      } finally {
+        checking = false;
+      }
+    };
+    pollTimer = window.setInterval(() => finish().catch(() => {}), 3000);
     stream.onmessage = (message) => {
       const event = JSON.parse(message.data);
       updateJobPanel(event);
@@ -1860,7 +1976,7 @@ async function createAndWaitForJob(query, uploadBody) {
       }
     };
     stream.onerror = () => {
-      finish().catch(reject);
+      finish().catch(() => {});
     };
   });
 }

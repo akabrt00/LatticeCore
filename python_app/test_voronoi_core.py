@@ -23,6 +23,7 @@ from voronoi_sphere_lines_mvp import (
     generate_points_in_box,
     inset_edges_for_box,
     keep_largest_graph_component,
+    map_implicit_progress,
     repair_mesh_for_export,
     validate_mesh,
 )
@@ -38,6 +39,21 @@ class VoronoiCoreTests(unittest.TestCase):
         first = generate_points_in_box(20, np.asarray([15.0, 15.0, 12.0]), random_seed=1221)
         second = generate_points_in_box(20, np.asarray([15.0, 15.0, 12.0]), random_seed=1221)
         np.testing.assert_allclose(first, second)
+
+    def test_implicit_progress_is_monotonic_across_phases(self):
+        samples = [
+            map_implicit_progress("memory-preflight", 0.0),
+            map_implicit_progress("memory-preflight", 1.0),
+            map_implicit_progress("generating-final-mesh", 0.0),
+            map_implicit_progress("generating-final-mesh", 1.0),
+            map_implicit_progress("clipping-interior", 0.0),
+            map_implicit_progress("clipping-interior", 1.0),
+            map_implicit_progress("extracting-surface", 0.0),
+            map_implicit_progress("extracting-surface", 1.0),
+        ]
+        self.assertEqual(samples, sorted(samples))
+        self.assertAlmostEqual(samples[0], 0.48)
+        self.assertAlmostEqual(samples[-1], 0.84)
 
     def test_points_stay_inside_rectangular_box(self):
         half_sizes = np.asarray([15.0, 15.0, 12.0])
