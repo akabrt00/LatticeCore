@@ -66,6 +66,44 @@ h1 { font-size: 18px; line-height: 1; font-weight: 750; }
 }
 .local-status span { width: 7px; height: 7px; box-shadow: 0 0 10px rgba(77, 199, 184, 0.55); }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.interface-mode-toggle {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px;
+  border: 1px solid #2b3333;
+  border-radius: 6px;
+  color: var(--muted);
+  background: #15191a;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.interface-mode-toggle.active {
+  border-color: rgba(77, 199, 184, 0.55);
+  color: #dce6e3;
+  background: #172321;
+}
+
+.interface-mode-toggle input {
+  margin: 0;
+}
+
+.advanced-only {
+  display: none !important;
+}
+
+body.advanced-mode .advanced-only:not([hidden]) {
+  display: revert !important;
+}
+
 .workspace {
   grid-template-columns: 316px minmax(360px, 1fr) 292px;
   overflow: hidden;

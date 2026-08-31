@@ -14,9 +14,15 @@
           <h1>LatticeCore</h1>
           <p>Lokální prototyp pro povrchové a experimentální objemové struktury</p>
         </div>
-        <div class="local-status">
-          <span></span>
-          Běží lokálně
+        <div class="topbar-actions">
+          <label class="interface-mode-toggle">
+            <span>Pokročilé</span>
+            <input id="advanced-mode-toggle" type="checkbox" />
+          </label>
+          <div class="local-status">
+            <span></span>
+            Běží lokálně
+          </div>
         </div>
       </header>
 
@@ -47,33 +53,33 @@
                   <option value="use-all-closed" selected>Použít všechny uzavřené</option>
                 </select>
               </label>
-              <label class="field">
+              <label class="field advanced-only">
                 <span>Komponenty výsledku</span>
                 <select id="final-component-mode">
                   <option value="keep-all" selected>Ponechat všechny</option>
                   <option value="keep-largest">Ponechat největší</option>
                 </select>
               </label>
-              <label class="field">
+              <label class="field advanced-only">
                 <span>Definice seedů</span>
                 <select id="seed-definition">
                   <option value="count" selected>Počet seedů</option>
                   <option value="cell-size">Cílová velikost buňky</option>
                 </select>
               </label>
-              <label id="target-cell-size-row" hidden>
+              <label id="target-cell-size-row" class="advanced-only" hidden>
                 <span>Velikost buňky <b id="target-cell-size-value">5.0 mm</b></span>
                 <input id="target-cell-size" type="range" min="1" max="30" value="5" step="0.5" />
               </label>
-              <label>
+              <label class="advanced-only">
                 <span>Odsazení seedů <b id="boundary-offset-value">0.0 mm</b></span>
                 <input id="boundary-offset" type="range" min="0" max="5" value="0" step="0.1" />
               </label>
-              <label class="field">
+              <label class="field advanced-only">
                 <span>Maximum pokusů samplování</span>
                 <input id="maximum-sampling-attempts" type="number" min="1000" max="5000000" value="1000000" step="10000" />
               </label>
-              <div class="conformal-settings">
+              <div class="conformal-settings advanced-only">
                 <h3>Povrchová Voronoi síť</h3>
                 <label class="field">
                   <span>Struktura hranice</span>
@@ -151,8 +157,8 @@
               </dl>
             </div>
             <button id="sample-cube" class="secondary-button" type="button">Ukázková kostka</button>
-            <button id="preset-paper-122" class="secondary-button" type="button">Referenční vzorek – 122 buněk</button>
-            <button id="preset-paper-80" class="secondary-button" type="button">Referenční vzorek – 80 buněk</button>
+            <button id="preset-paper-122" class="secondary-button advanced-only" type="button">Referenční vzorek – 122 buněk</button>
+            <button id="preset-paper-80" class="secondary-button advanced-only" type="button">Referenční vzorek – 80 buněk</button>
             <button id="sample-cylinder" class="secondary-button" type="button">Ukázkový válec</button>
           </section>
 
@@ -164,6 +170,14 @@
             </div>
 
             <label class="field">
+              <span>Výstup</span>
+              <select id="mesh-engine">
+                <option value="legacy-primitives" selected>Rychlý náhled</option>
+                <option value="implicit-union">Finální STL pro tisk</option>
+              </select>
+            </label>
+
+            <label class="field advanced-only">
               <span>Typ vzoru</span>
               <select id="pattern">
                 <option value="voronoi">Voronoi lattice</option>
@@ -189,7 +203,7 @@
               <span>Počet buněk <b id="cell-size-value">122</b></span>
               <input id="cell-size" type="range" min="20" max="500" value="122" />
             </label>
-            <label>
+            <label class="advanced-only">
               <span>Odsazení povrchu <b id="depth-value">0.8 mm</b></span>
               <input id="depth" type="range" min="0" max="3" value="0.8" step="0.1" />
             </label>
@@ -197,36 +211,36 @@
               <span>Průměr prutů <b id="wall-value">1.00 mm</b></span>
               <input id="wall" type="range" min="0.15" max="2.5" value="1.0" step="0.05" />
             </label>
-            <label>
+            <label class="advanced-only">
               <span>Min. délka prutu <b id="min-strut-value">2.0 mm</b></span>
               <input id="min-strut" type="range" min="0" max="8" value="2" step="0.1" />
             </label>
-            <label>
+            <label class="advanced-only">
               <span>Random seed <b id="seed-value">1221</b></span>
               <input id="seed" type="range" min="1" max="9999" value="1221" step="1" />
             </label>
-            <label class="field">
+            <label class="field advanced-only">
               <span>Omezení výsledku</span>
               <select id="boundary-mode">
                 <option value="exact" selected>Přesné vnější rozměry</option>
                 <option value="centerline">Osy uvnitř boxu</option>
               </select>
             </label>
-            <label class="toggle-row">
+            <label class="toggle-row advanced-only">
               <span>Ponechat jen největší komponentu</span>
               <input id="remove-disconnected" type="checkbox" />
             </label>
-            <label>
+            <label class="advanced-only">
               <span>Spojování hran <b id="density-value">4.2</b></span>
               <input id="density" type="range" min="1.5" max="5.5" value="4.2" step="0.1" />
             </label>
-            <label>
+            <label class="advanced-only">
               <span>Náhodnost buněk <b id="smooth-value">0.35</b></span>
               <input id="smooth" type="range" min="0" max="1" value="0.35" step="0.05" />
             </label>
           </section>
 
-          <section class="panel controls">
+          <section class="panel controls advanced-only">
             <h2>Tisk</h2>
             <label class="toggle-row">
               <span>Doplňkové samonosné pruty <b id="print-support-value">vyp</b></span>
@@ -259,16 +273,9 @@
             <button id="align-build-plate" class="secondary-button" type="button">Srovnat na podložku</button>
           </section>
 
-          <section class="panel controls">
-            <h2>Tvorba výsledného meshe</h2>
-            <label class="field">
-              <span>Mesh engine</span>
-              <select id="mesh-engine">
-                <option value="legacy-primitives" selected>Rychlý export – samostatné pruty</option>
-                <option value="implicit-union">Finální watertight mesh – pomalý</option>
-              </select>
-            </label>
-            <label class="field">
+          <section class="panel controls advanced-only">
+            <h2>Kvalita finálního meshe</h2>
+            <label class="field advanced-only">
               <span>Kvalita</span>
               <select id="quality-preset">
                 <option value="preview" selected>Rychlá pracovní kvalita</option>
@@ -277,14 +284,14 @@
                 <option value="custom">Vlastní</option>
               </select>
             </label>
-            <label>
+            <label class="advanced-only">
               <span>Velikost voxelu <b id="voxel-size-value">0.167 mm</b></span>
               <input id="voxel-size" type="number" min="0.04" max="1" value="0.15" step="0.01" disabled />
             </label>
-            <p id="mesh-engine-note">Pruty a uzly budou spojeny do jednoho implicitního objemu.</p>
+            <p id="mesh-engine-note" class="advanced-only">Pruty a uzly budou spojeny do jednoho implicitního objemu.</p>
           </section>
 
-          <section class="panel controls">
+          <section class="panel controls advanced-only">
             <h2>Hustota a hmotnost</h2>
             <label class="field">
               <span>Režim řízení</span>
@@ -321,11 +328,11 @@
             <button id="preview" class="primary-button" type="button">Přepočítat náhled</button>
             <button id="reset" class="secondary-button" type="button">Reset</button>
             <button id="export" class="secondary-button" type="button">Export STL</button>
-            <button id="export-metadata" class="secondary-button" type="button">Export JSON</button>
-            <button id="export-density-csv" class="secondary-button" type="button" disabled>Export průběhu CSV</button>
-            <button id="export-batch-zip" class="secondary-button" type="button" hidden>Stáhnout vše jako ZIP</button>
-            <button id="export-batch-summary-csv" class="secondary-button" type="button" hidden>Souhrnný CSV</button>
-            <button id="export-batch-summary-json" class="secondary-button" type="button" hidden>Souhrnný JSON</button>
+            <button id="export-metadata" class="secondary-button advanced-only" type="button">Export JSON</button>
+            <button id="export-density-csv" class="secondary-button advanced-only" type="button" disabled>Export průběhu CSV</button>
+            <button id="export-batch-zip" class="secondary-button advanced-only" type="button" hidden>Stáhnout vše jako ZIP</button>
+            <button id="export-batch-summary-csv" class="secondary-button advanced-only" type="button" hidden>Souhrnný CSV</button>
+            <button id="export-batch-summary-json" class="secondary-button advanced-only" type="button" hidden>Souhrnný JSON</button>
           </section>
         </aside>
 
@@ -367,22 +374,22 @@
                 <dt>Tisk bez podpor</dt>
                 <dd id="print-state">Nezkontrolováno</dd>
               </div>
-              <div>
+              <div class="advanced-only">
                 <dt>Ostrovy</dt>
                 <dd id="print-islands">0</dd>
               </div>
-              <div>
+              <div class="advanced-only">
                 <dt>Opraveno</dt>
                 <dd id="print-fixed">0</dd>
               </div>
-              <div>
+              <div class="advanced-only">
                 <dt>Doplněné pruty</dt>
                 <dd id="print-struts">0</dd>
               </div>
             </dl>
           </section>
 
-          <section class="panel" id="debug-panel">
+          <section class="panel advanced-only" id="debug-panel">
             <h2>Diagnostické vrstvy</h2>
             <div class="debug-actions">
               <button type="button" data-debug-preset="interior">Vnitřní síť</button>
@@ -407,7 +414,7 @@
             <p class="panel-note">Diagnostika používá skutečné osy exportu. Změna výběru se načte při dalším přepočtu.</p>
           </section>
 
-          <section class="panel" id="cache-panel">
+          <section class="panel advanced-only" id="cache-panel">
             <h2>Výpočetní cache</h2>
             <label class="toggle-row"><span>Ukládat mezivýsledky lokálně</span><input id="cache-enabled" type="checkbox" checked /></label>
             <dl class="compact-stats">
@@ -430,11 +437,11 @@
               <dt>Worker</dt><dd id="worker-status">Startuje</dd>
               <dt>Úloha</dt><dd id="job-status">-</dd>
               <dt>Fáze</dt><dd id="job-phase">-</dd>
-              <dt>Cíl série</dt><dd id="job-target">-</dd>
-              <dt>Iterace</dt><dd id="job-iteration">-</dd>
-              <dt>Scale / hustota</dt><dd id="job-density">-</dd>
-              <dt>Cache</dt><dd id="job-cache">-</dd>
-              <dt>Paměť workeru</dt><dd id="worker-memory">-</dd>
+              <dt class="advanced-only">Cíl série</dt><dd id="job-target" class="advanced-only">-</dd>
+              <dt class="advanced-only">Iterace</dt><dd id="job-iteration" class="advanced-only">-</dd>
+              <dt class="advanced-only">Scale / hustota</dt><dd id="job-density" class="advanced-only">-</dd>
+              <dt class="advanced-only">Cache</dt><dd id="job-cache" class="advanced-only">-</dd>
+              <dt class="advanced-only">Paměť workeru</dt><dd id="worker-memory" class="advanced-only">-</dd>
               <dt>Čas / fronta</dt><dd id="job-time">-</dd>
             </dl>
             <div class="job-progress-copy">
@@ -446,12 +453,12 @@
             <ol id="job-messages" class="job-messages"></ol>
             <div class="cache-actions">
               <button id="cancel-job" type="button" disabled>Zrušit výpočet</button>
-              <label for="memory-cache-scope">RAM</label>
-              <select id="memory-cache-scope">
+              <label class="advanced-only" for="memory-cache-scope">RAM</label>
+              <select id="memory-cache-scope" class="advanced-only">
                 <option value="unused">Jen nepoužívané</option>
                 <option value="all">Všechny neaktivní</option>
               </select>
-              <button id="clear-memory-cache" type="button">Vymazat RAM cache</button>
+              <button id="clear-memory-cache" class="advanced-only" type="button">Vymazat RAM cache</button>
             </div>
           </section>
 
@@ -462,7 +469,7 @@
             </p>
           </section>
 
-          <section class="panel">
+          <section class="panel advanced-only">
             <h2>Statistiky</h2>
             <dl class="stats">
               <div><dt>Voronoi vrcholy</dt><dd id="stat-voronoi-vertices">-</dd></div>
@@ -480,7 +487,7 @@
             </dl>
           </section>
 
-          <section class="panel" id="mesh-validation-panel">
+          <section class="panel advanced-only" id="mesh-validation-panel">
             <h2>Validace meshe</h2>
             <dl class="stats">
               <div><dt>Watertight</dt><dd id="validation-watertight">-</dd></div>
@@ -493,7 +500,7 @@
             <p id="validation-warning" hidden>Mesh není watertight. Export je povolen, ale před tiskem jej zkontroluj ve sliceru.</p>
           </section>
 
-          <section class="panel" id="density-results-panel">
+          <section class="panel advanced-only" id="density-results-panel">
             <h2>Hustota a hmotnost</h2>
             <dl class="compact-stats">
               <dt>Požadovaná hustota</dt><dd id="density-target-result">-</dd>
@@ -519,7 +526,7 @@
             </div>
           </section>
 
-          <section class="panel" id="density-batch-results-panel" hidden>
+          <section class="panel advanced-only" id="density-batch-results-panel" hidden>
             <h2>Řada hustot</h2>
             <dl class="compact-stats">
               <dt>Dokončeno / selhalo</dt><dd id="batch-completion-result">-</dd>
@@ -537,7 +544,7 @@
             </div>
           </section>
 
-          <section class="panel">
+          <section class="panel advanced-only">
             <h2>Implicitní meshing</h2>
             <dl class="stats">
               <div><dt>Engine</dt><dd id="implicit-engine">-</dd></div>
@@ -550,7 +557,7 @@
             </dl>
           </section>
 
-          <section class="panel">
+          <section class="panel advanced-only">
             <h2>Stav prototypu</h2>
             <p>
               Objemový režim kombinuje povrchovou conformal síť, vnitřní Voronoi výplň a jejich connectory.

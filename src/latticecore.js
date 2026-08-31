@@ -15,6 +15,7 @@ import {
 } from "./boxSurfaceVoronoi.js";
 
 const viewport = document.querySelector("#viewport");
+const advancedModeToggle = document.querySelector("#advanced-mode-toggle");
 const fileInput = document.querySelector("#stl-input");
 const fileDrop = document.querySelector(".file-drop");
 const sampleCubeButton = document.querySelector("#sample-cube");
@@ -311,6 +312,9 @@ const anchorMaterial = new THREE.MeshStandardMaterial({
 init();
 
 function init() {
+  const advancedModeEnabled = window.localStorage.getItem("latticecore-advanced-mode") === "true";
+  advancedModeToggle.checked = advancedModeEnabled;
+  syncAdvancedMode();
   bindEvents();
   printControlsConfig.plane.value = "xy";
   printControlsConfig.support.checked = false;
@@ -335,6 +339,10 @@ function init() {
 
 function bindEvents() {
   window.addEventListener("resize", resize);
+  advancedModeToggle.addEventListener("change", () => {
+    syncAdvancedMode();
+    window.localStorage.setItem("latticecore-advanced-mode", String(advancedModeToggle.checked));
+  });
 
   fileInput.addEventListener("change", (event) => {
     const file = event.target.files?.[0];
@@ -477,6 +485,11 @@ function bindEvents() {
       applyStructure();
     });
   });
+}
+
+function syncAdvancedMode() {
+  document.body.classList.toggle("advanced-mode", advancedModeToggle.checked);
+  advancedModeToggle.closest("label")?.classList.toggle("active", advancedModeToggle.checked);
 }
 
 function updateConformalLabels() {

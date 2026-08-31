@@ -28,3 +28,16 @@ test("component validation errors are translated into actionable Czech guidance"
   assert.match(source, /Model obsahuje \$\{count\} oddělených komponent/);
   assert.match(source, /Některá komponenta modelu není uzavřená nebo manifold/);
 });
+
+test("basic mode keeps the primary workflow visible and hides research controls", async () => {
+  const [html, styles] = await Promise.all([
+    fs.readFile(path.join(root, "index.html"), "utf8"),
+    fs.readFile(path.join(root, "src", "workbench.css"), "utf8"),
+  ]);
+  assert.match(html, /id="advanced-mode-toggle"/);
+  assert.match(html, /<select id="mesh-engine">/);
+  assert.match(html, /id="export" class="secondary-button"/);
+  assert.match(html, /class="panel advanced-only" id="debug-panel"/);
+  assert.match(html, /class="panel advanced-only" id="cache-panel"/);
+  assert.match(styles, /body\.advanced-mode \.advanced-only:not\(\[hidden\]\)/);
+});
